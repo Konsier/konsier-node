@@ -1,7 +1,7 @@
-import { zodToJsonSchema } from "zod-to-json-schema";
+import { toJSONSchema } from "zod";
 
 import { KonsierError, toErrorMessage } from "./errors";
-import type { ToolContext } from "./types";
+import type { JsonObject, ToolContext } from "./types";
 
 const TOOL_NAME_REGEX = /^[a-zA-Z0-9_-]+$/;
 
@@ -18,7 +18,7 @@ export interface ToolInputSchema<TInput> {
 
 export interface ToolDefinition<
   TInput = unknown,
-  TOutput extends Record<string, unknown> = Record<string, unknown>,
+  TOutput extends JsonObject = JsonObject,
 > {
   name: string;
   description: string;
@@ -28,7 +28,7 @@ export interface ToolDefinition<
 
 export interface Tool<
   TInput = any,
-  TOutput extends Record<string, unknown> = Record<string, unknown>,
+  TOutput extends JsonObject = JsonObject,
 > {
   name: string;
   description: string;
@@ -39,7 +39,7 @@ export interface Tool<
 
 export function createTool<
   TInput,
-  TOutput extends Record<string, unknown> = Record<string, unknown>,
+  TOutput extends JsonObject = JsonObject,
 >(definition: ToolDefinition<TInput, TOutput>): Tool<TInput, TOutput> {
   const name = definition.name?.trim();
   if (!name) {
@@ -141,10 +141,7 @@ function deriveInputSchema<TInput>(
 
   if (isZodSchema(schema)) {
     try {
-      const converted = zodToJsonSchema(schema as never, {
-        name: `${toolName}Input`,
-        $refStrategy: "none",
-      });
+      const converted = toJSONSchema(schema as never);
 
       if (converted && typeof converted === "object" && !Array.isArray(converted)) {
         return converted as Record<string, unknown>;
@@ -166,7 +163,7 @@ function isZodSchema<TInput>(schema: ToolInputSchema<TInput>): boolean {
   }
 
   const maybe = schema as Record<string, unknown>;
-  return typeof maybe.safeParse === "function" && "_def" in maybe;
+  return typeof maybe.safeParse === "function" && "_zod" in maybe;
 }
 
 function formatParseError(error: unknown): string {

@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{pageTitle}}</title>
+    <link rel="stylesheet" href="/assets/dashboard.css" />
+  </head>
+  <body>
+    <header class="app-header">
+      <div class="logo">
+        <div class="logo-icon">T</div>
+        Tasks
+      </div>
+      <div class="header-stats">
+        <span><strong>{{openTasks}}</strong> open</span>
+        <span><strong>{{doneTasks}}</strong> done</span>
+        <span><strong>{{highPriorityTasks}}</strong> urgent</span>
+      </div>
+    </header>
+
+    <main class="shell">
+      {{contextCard}}
+
+      <form class="create-form" method="post" action="/tasks">
+        <input type="text" name="title" placeholder="What needs to be done?" autocomplete="off" />
+        <select name="priority">
+          <option value="medium">Medium</option>
+          <option value="high">High</option>
+          <option value="low">Low</option>
+        </select>
+        <button type="submit" class="btn btn-primary">Add</button>
+      </form>
+
+      <div class="section-label">{{totalTasks}} tasks</div>
+      <ul class="tasks">{{taskItems}}</ul>
+    </main>
+  </body>
+</html>

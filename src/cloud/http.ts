@@ -1,4 +1,6 @@
 import {
+  DEFAULT_CLOUD_BASE_URL,
+  ENV_CLOUD_BASE_URL,
   DEFAULT_MAX_RETRIES,
   DEFAULT_REQUEST_TIMEOUT_MS,
   HEADER_AUTHORIZATION,
@@ -9,9 +11,7 @@ import { KonsierError } from "../errors";
 export interface CloudApiClientOptions {
   apiKey: string;
   baseUrl: string;
-  timeoutMs?: number;
-  maxRetries?: number;
-  fetchImpl?: typeof fetch;
+  debug?: boolean;
 }
 
 export class CloudApiClient {
@@ -19,14 +19,14 @@ export class CloudApiClient {
   private readonly baseUrl: string;
   private readonly timeoutMs: number;
   private readonly maxRetries: number;
-  private readonly fetchImpl: typeof fetch;
+  private readonly debug: boolean;
 
   constructor(options: CloudApiClientOptions) {
     this.apiKey = options.apiKey;
     this.baseUrl = options.baseUrl.replace(/\/+$/, "");
-    this.timeoutMs = options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
-    this.maxRetries = options.maxRetries ?? DEFAULT_MAX_RETRIES;
-    this.fetchImpl = options.fetchImpl ?? fetch;
+    this.timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS;
+    this.maxRetries = DEFAULT_MAX_RETRIES;
+    this.debug = Boolean(options.debug);
   }
 
   async post(
@@ -36,13 +36,21 @@ export class CloudApiClient {
     const url = `${this.baseUrl}${path.startsWith("/") ? path : `/${path}`}`;
     const payload = JSON.stringify(stripUndefined(body));
 
+    if (shouldDebugLog(this.debug)) {
+      console.log("[konsier] cloud request", {
+        url,
+        path,
+        body: stripUndefined(body),
+      });
+    }
+
     let lastError: unknown = null;
     for (let attempt = 0; attempt <= this.maxRetries; attempt += 1) {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
 
       try {
-        const response = await this.fetchImpl(url, {
+        const response = await fetch(url, {
           method: "POST",
           headers: {
             [HEADER_AUTHORIZATION]: `Bearer ${this.apiKey}`,
@@ -73,6 +81,14 @@ export class CloudApiClient {
           });
         }
 
+        if (shouldDebugLog(this.debug)) {
+          console.log("[konsier] cloud response", {
+            url,
+            status: response.status,
+            body: parsed ?? {},
+          });
+        }
+
         return parsed ?? {};
       } catch (error) {
         lastError = error;
@@ -82,6 +98,14 @@ export class CloudApiClient {
             (error instanceof Error && error.name === "AbortError"));
 
         if (!shouldRetry) {
+          if (shouldDebugLog(this.debug)) {
+            console.warn("[konsier] cloud request failed", {
+              url,
+              attempt: attempt + 1,
+              error:
+                error instanceof Error ? error.message : "Unknown error",
+            });
+          }
           throw error;
         }
       } finally {
@@ -97,6 +121,30 @@ export class CloudApiClient {
       })
     );
   }
+}
+
+export function resolveCloudBaseUrl(input?: { debug?: boolean }): string {
+  const override = process.env[ENV_CLOUD_BASE_URL]?.trim();
+  if (override) {
+    const resolved = override.replace(/\/+$/, "");
+    if (shouldDebugLog(Boolean(input?.debug))) {
+      console.log("[konsier] resolved cloud base URL from env", {
+        env: ENV_CLOUD_BASE_URL,
+        value: resolved,
+      });
+    }
+    return resolved;
+  }
+  if (shouldDebugLog(Boolean(input?.debug))) {
+    console.log("[konsier] resolved cloud base URL from default", {
+      value: DEFAULT_CLOUD_BASE_URL,
+    });
+  }
+  return DEFAULT_CLOUD_BASE_URL;
+}
+
+function shouldDebugLog(debug: boolean): boolean {
+  return debug && process.env.NODE_ENV === "development";
 }
 
 function parseJsonObject(raw: string): Record<string, unknown> | null {

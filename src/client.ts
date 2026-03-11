@@ -1,11 +1,8 @@
-import {
-  DEFAULT_ALLOWED_CLOCK_SKEW_MS,
-  DEFAULT_CLOUD_BASE_URL,
-} from "./constants";
+import { DEFAULT_ALLOWED_CLOCK_SKEW_MS, ENV_CLOUD_BASE_URL } from "./constants";
 import { linkUser as linkCloudUser } from "./cloud/link-user";
-import { CloudApiClient } from "./cloud/http";
+import { CloudApiClient, resolveCloudBaseUrl } from "./cloud/http";
 import { sendMessage } from "./cloud/send";
-import { KonsierError } from "./errors";
+import { KonsierError, toErrorMessage } from "./errors";
 import { createHandler } from "./handler";
 import { createVerifyPageMiddleware } from "./page/verify";
 import { createTool, type Tool } from "./tool";
@@ -17,12 +14,163 @@ import type {
   HandlerOptions,
   InternalDefinition,
   InternalEntry,
+  JsonObject,
   KonsierOptions,
   LinkUserInput,
   ManifestContext,
+  MountableApp,
   PageDefinition,
   SendInput,
 } from "./types";
+
+const REGISTRATION_RETRY_DELAYS_MS = [5_000, 15_000, 60_000] as const;
+
+function shouldDebugLog(debug: boolean): boolean {
+  return debug && process.env.NODE_ENV === "development";
+}
+
+function maskSecret(value: string): string {
+  const normalized = value.trim();
+  if (!normalized) {
+    return "<empty>";
+  }
+  if (normalized.length <= 8) {
+    return "***";
+  }
+  return `${normalized.slice(0, 4)}...${normalized.slice(-4)}`;
+}
+
+function normalizeEndpointUrl(raw: string | undefined): string | null {
+  if (typeof raw === "undefined") {
+    return null;
+  }
+
+  const normalized = raw.trim().replace(/\/+$/, "");
+  if (!normalized) {
+    throw new KonsierError({
+      code: "INVALID_ENDPOINT_URL",
+      message: "Konsier endpointUrl must be a valid http(s) URL.",
+      statusCode: 400,
+    });
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(normalized);
+  } catch {
+    throw new KonsierError({
+      code: "INVALID_ENDPOINT_URL",
+      message: "Konsier endpointUrl must be a valid http(s) URL.",
+      statusCode: 400,
+    });
+  }
+
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new KonsierError({
+      code: "INVALID_ENDPOINT_URL",
+      message: "Konsier endpointUrl must use http or https.",
+      statusCode: 400,
+    });
+  }
+
+  if (parsed.search || parsed.hash) {
+    throw new KonsierError({
+      code: "INVALID_ENDPOINT_URL",
+      message: "Konsier endpointUrl must not include query or hash segments.",
+      statusCode: 400,
+    });
+  }
+
+  return parsed.toString().replace(/\/+$/, "");
+}
+
+function endpointPath(endpointUrl: string): string {
+  const pathname = new URL(endpointUrl).pathname.replace(/\/+$/, "");
+  return pathname || "/";
+}
+
+function createJsonBodyMiddleware(rawBodyProperty: string) {
+  return function jsonBodyMiddleware(
+    req: {
+      body?: unknown;
+      method?: string;
+      on?: (event: string, listener: (...args: unknown[]) => void) => void;
+      headers?: Record<string, string | string[] | undefined>;
+      [key: string]: unknown;
+    },
+    _res: unknown,
+    next?: (error?: unknown) => void,
+  ): void {
+    if (typeof next !== "function") {
+      return;
+    }
+
+    if (typeof req.body !== "undefined") {
+      if (typeof req[rawBodyProperty] === "undefined") {
+        if (Buffer.isBuffer(req.body)) {
+          req[rawBodyProperty] = req.body;
+        } else if (typeof req.body === "string") {
+          req[rawBodyProperty] = Buffer.from(req.body, "utf8");
+        } else if (req.body && typeof req.body === "object") {
+          req[rawBodyProperty] = Buffer.from(JSON.stringify(req.body), "utf8");
+        }
+      }
+      next();
+      return;
+    }
+
+    const method = (req.method ?? "POST").toUpperCase();
+    if (method !== "POST") {
+      next();
+      return;
+    }
+
+    if (typeof req.on !== "function") {
+      next();
+      return;
+    }
+
+    const chunks: Buffer[] = [];
+    let finished = false;
+
+    const finalize = (error?: unknown): void => {
+      if (finished) {
+        return;
+      }
+      finished = true;
+      next(error);
+    };
+
+    req.on("data", (chunk: unknown) => {
+      chunks.push(
+        Buffer.isBuffer(chunk)
+          ? chunk
+          : Buffer.from(typeof chunk === "string" ? chunk : ""),
+      );
+    });
+    req.on("end", () => {
+      const rawBody = Buffer.concat(chunks);
+      req[rawBodyProperty] = rawBody;
+
+      if (rawBody.length === 0) {
+        req.body = {};
+        finalize();
+        return;
+      }
+
+      try {
+        req.body = JSON.parse(rawBody.toString("utf8"));
+      } catch {
+        req.body = rawBody.toString("utf8");
+      }
+
+      finalize();
+    });
+    req.on("error", (error: unknown) => {
+      finalize(error);
+    });
+  };
+}
 
 export class Konsier {
   static tool = createTool;
@@ -32,6 +180,11 @@ export class Konsier {
   private readonly internal: InternalEntry | null;
   private readonly cloudClient: CloudApiClient;
   private readonly allowedClockSkewMs: number;
+  private readonly endpointUrl: string | null;
+  private readonly debug: boolean;
+  private mountedPath: string | null = null;
+  private registrationTimer: ReturnType<typeof setTimeout> | null = null;
+  private registrationComplete = false;
 
   constructor(options: KonsierOptions) {
     if (!options.apiKey?.trim()) {
@@ -42,46 +195,64 @@ export class Konsier {
       });
     }
 
-    if (!options.agents || Object.keys(options.agents).length === 0) {
+    if (
+      (!options.agents || Object.keys(options.agents).length === 0) &&
+      !options.internal
+    ) {
       throw new KonsierError({
-        code: "INVALID_AGENTS",
-        message: "Konsier requires at least one agent.",
+        code: "INVALID_SURFACES",
+        message: "Konsier requires at least one agent or internal definition.",
         statusCode: 400,
       });
     }
 
     this.apiKey = options.apiKey;
-    this.agents = options.agents;
+    this.agents = options.agents ?? {};
     this.internal = options.internal ?? null;
-    this.allowedClockSkewMs =
-      options.allowedClockSkewMs ?? DEFAULT_ALLOWED_CLOCK_SKEW_MS;
+    this.allowedClockSkewMs = DEFAULT_ALLOWED_CLOCK_SKEW_MS;
+    this.endpointUrl = normalizeEndpointUrl(options.endpointUrl);
+    this.debug = Boolean(options.debug);
+    const cloudBaseUrl = resolveCloudBaseUrl({ debug: this.debug });
 
     const cloudClientOptions: ConstructorParameters<typeof CloudApiClient>[0] = {
       apiKey: this.apiKey,
-      baseUrl: DEFAULT_CLOUD_BASE_URL,
+      baseUrl: cloudBaseUrl,
+      debug: this.debug,
     };
-
-    if (options.maxRetries !== undefined) {
-      cloudClientOptions.maxRetries = options.maxRetries;
-    }
-    if (options.fetchImpl !== undefined) {
-      cloudClientOptions.fetchImpl = options.fetchImpl;
-    }
 
     this.cloudClient = new CloudApiClient(cloudClientOptions);
 
     this.validateAgentRegistry();
     this.validateInternalRegistry();
+
+    if (shouldDebugLog(this.debug)) {
+      console.log("[konsier] initialized", {
+        endpointUrl: this.endpointUrl,
+        cloudBaseUrl,
+        cloudBaseUrlEnv: process.env[ENV_CLOUD_BASE_URL] ?? null,
+        apiKey: maskSecret(this.apiKey),
+        agentRefs: Object.keys(this.agents),
+        internalPages: this.internal && typeof this.internal !== "function"
+          ? (this.internal.pages ?? []).length
+          : null,
+        internalTools: this.internal && typeof this.internal !== "function"
+          ? (this.internal.tools ?? []).length
+          : null,
+      });
+    }
   }
 
   handler(options?: HandlerOptions) {
     const handlerDependencies: Parameters<typeof createHandler>[0] = {
       apiKey: this.apiKey,
       allowedClockSkewMs: this.allowedClockSkewMs,
+      debug: this.debug,
       handleToolCall: {
         resolveAgentConfig: (agent, account) =>
           this.resolveAgentConfig(agent, account),
-        sendMessage: (input) => this.send(input),
+        resolveInternalDefinition: (account) =>
+          this.resolveInternalEntry({ account }),
+        sendMessage: (input) => this.sendMessage(input),
       },
       handleResolveAgent: {
         resolveAgentConfig: (agent, account) =>
@@ -103,10 +274,42 @@ export class Konsier {
     return createVerifyPageMiddleware({
       apiKey: this.apiKey,
       allowedClockSkewMs: this.allowedClockSkewMs,
+      debug: this.debug,
     });
   }
 
-  async send(input: SendInput): Promise<void> {
+  mount(app: MountableApp): void {
+    if (!this.endpointUrl) {
+      throw new KonsierError({
+        code: "ENDPOINT_URL_REQUIRED",
+        message: "Konsier mount() requires endpointUrl to be configured.",
+        statusCode: 400,
+      });
+    }
+
+    if (this.mountedPath) {
+      if (shouldDebugLog(this.debug)) {
+        console.log("[konsier] mount skipped", { path: this.mountedPath });
+      }
+      return;
+    }
+
+    const path = endpointPath(this.endpointUrl);
+    app.use(path, createJsonBodyMiddleware("rawBody"));
+    app.use(path, this.handler());
+    this.mountedPath = path;
+
+    if (shouldDebugLog(this.debug)) {
+      console.log("[konsier] mounted", {
+        path,
+        endpointUrl: this.endpointUrl,
+      });
+    }
+
+    void this.startRegistration();
+  }
+
+  async sendMessage(input: SendInput): Promise<void> {
     await sendMessage(this.cloudClient, input);
   }
 
@@ -115,7 +318,23 @@ export class Konsier {
   }
 
   async refresh(): Promise<void> {
-    await this.cloudClient.post("/api/agents/refresh", {});
+    const payload =
+      this.endpointUrl === null ? {} : { endpoint_url: this.endpointUrl };
+
+    if (shouldDebugLog(this.debug)) {
+      console.log("[konsier] refresh requested", payload);
+    }
+
+    await this.cloudClient.post("/agents/refresh", payload);
+    this.registrationComplete = true;
+    if (this.registrationTimer) {
+      clearTimeout(this.registrationTimer);
+      this.registrationTimer = null;
+    }
+
+    if (shouldDebugLog(this.debug)) {
+      console.log("[konsier] refresh succeeded", payload);
+    }
   }
 
   private async resolveAgentConfig(
@@ -132,7 +351,11 @@ export class Konsier {
   ): Promise<{
     agents: AgentManifestEntry[];
     internal: {
-      tools: Array<{ name: string }>;
+      tools: Array<{
+        name: string;
+        description: string;
+        input: Record<string, unknown>;
+      }>;
       pages: Array<{ name: string; path: string }>;
     };
   }> {
@@ -158,7 +381,7 @@ export class Konsier {
     return {
       agents,
       internal: {
-        tools: this.toolDefinitions(internal.tools ?? [], "internal", 500),
+        tools: this.manifestTools(internal.tools ?? [], "internal", 500),
         pages: this.pageDefinitions(internal.pages ?? [], "internal", 500),
       },
     };
@@ -227,7 +450,7 @@ export class Konsier {
       return;
     }
 
-    this.toolDefinitions(this.internal.tools ?? [], "internal", 400);
+    this.manifestTools(this.internal.tools ?? [], "internal", 400);
     this.pageDefinitions(this.internal.pages ?? [], "internal", 400);
   }
 
@@ -244,14 +467,18 @@ export class Konsier {
       });
     }
 
-    this.toolDefinitions(config.tools, `agent "${agentKey}"`, statusCode);
+    this.manifestTools(config.tools, `agent "${agentKey}"`, statusCode);
   }
 
-  private toolDefinitions(
-    tools: Array<Tool<any, Record<string, unknown>>>,
+  private manifestTools(
+    tools: Array<Tool<any, JsonObject>>,
     owner: string,
     statusCode: number,
-  ): Array<{ name: string }> {
+  ): Array<{
+    name: string;
+    description: string;
+    input: Record<string, unknown>;
+  }> {
     if (!Array.isArray(tools)) {
       throw new KonsierError({
         code: "INVALID_TOOL",
@@ -271,7 +498,11 @@ export class Konsier {
         });
       }
       names.add(tool.name);
-      return { name: tool.name };
+      return {
+        name: tool.name,
+        description: tool.description,
+        input: tool.inputSchema,
+      };
     });
   }
 
@@ -316,7 +547,11 @@ export class Konsier {
     });
   }
 
-  private validateTool(tool: Tool, owner: string, statusCode: number): void {
+  private validateTool(
+    tool: Tool<any, JsonObject>,
+    owner: string,
+    statusCode: number,
+  ): void {
     if (!tool || typeof tool !== "object") {
       throw new KonsierError({
         code: "INVALID_TOOL",
@@ -343,5 +578,51 @@ export class Konsier {
         statusCode,
       });
     }
+  }
+
+  private async startRegistration(attempt = 0): Promise<void> {
+    if (this.registrationComplete) {
+      return;
+    }
+
+    try {
+      await this.refresh();
+    } catch (error) {
+      const shouldRetry = this.shouldRetryRegistration(error);
+      const delay =
+        REGISTRATION_RETRY_DELAYS_MS[
+          Math.min(attempt, REGISTRATION_RETRY_DELAYS_MS.length - 1)
+        ];
+
+      if (shouldDebugLog(this.debug)) {
+        console.warn("[konsier] refresh failed", {
+          attempt: attempt + 1,
+          endpointUrl: this.endpointUrl,
+          error: toErrorMessage(error),
+          retrying: shouldRetry,
+          retryInMs: shouldRetry ? delay : null,
+        });
+      }
+
+      if (!shouldRetry) {
+        return;
+      }
+
+      this.registrationTimer = setTimeout(() => {
+        void this.startRegistration(attempt + 1);
+      }, delay);
+    }
+  }
+
+  private shouldRetryRegistration(error: unknown): boolean {
+    if (error instanceof KonsierError) {
+      return error.statusCode >= 500;
+    }
+
+    if (error instanceof TypeError) {
+      return true;
+    }
+
+    return error instanceof Error && error.name === "AbortError";
   }
 }

@@ -1,0 +1,21 @@
+{
+  "name": "konsier-node-example-restaurant-manager",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsup src/server.ts --format esm --target node20 --out-dir dist",
+    "start": "node dist/server.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.6.1",
+    "konsier": "file:../..",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.10",
+    "tsup": "^8.4.0",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2"
+  }
+}

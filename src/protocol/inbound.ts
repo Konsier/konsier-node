@@ -1,4 +1,4 @@
-import type { Channel } from "../types";
+import type { Attachment, Channel } from "../types";
 
 export interface InboundAccount {
   id: number | string;
@@ -19,9 +19,23 @@ export interface ToolCallRequest {
     id: number;
     project_id: number;
     execution_project_id: number;
+    started_at: string;
+    message_count: number;
+  };
+  message: {
+    text?: string;
+    html?: string;
+    attachments?: Attachment[];
   };
   channel: Channel;
-  agent: string;
+  target:
+    | {
+        type: "agent";
+        agent: string;
+      }
+    | {
+        type: "internal";
+      };
   tool: {
     name: string;
     input: Record<string, unknown>;
@@ -46,15 +60,7 @@ export type SdkHandlerRequest =
   | ResolveAgentRequest
   | ManifestRequest;
 
-export type ToolCallResponse =
-  | {
-      ok: true;
-      result: Record<string, unknown>;
-    }
-  | {
-      ok: false;
-      error: string;
-    };
+export type ToolCallResponse = Record<string, unknown>;
 
 export interface ResolveAgentResponse {
   systemPrompt: string;
@@ -74,6 +80,8 @@ export interface ManifestResponse {
   internal: {
     tools: Array<{
       name: string;
+      description: string;
+      input: Record<string, unknown>;
     }>;
     pages: Array<{
       name: string;

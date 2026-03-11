@@ -22,7 +22,7 @@ export async function sendMessage(
     });
   }
 
-  await client.post("/api/messages/send", {
+  await client.post("/messages/send", {
     userId: input.userId,
     conversationId:
       input.conversationId === undefined

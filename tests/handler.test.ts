@@ -60,6 +60,16 @@ describe("handler", () => {
     }),
   });
 
+  const lookupOrder = Konsier.tool({
+    name: "lookup_order",
+    description: "Lookup an order",
+    input: z.object({ orderId: z.string() }),
+    handler: async (input) => ({
+      orderId: input.orderId,
+      status: "ready",
+    }),
+  });
+
   const sdk = new Konsier({
     apiKey,
     agents: {
@@ -71,20 +81,29 @@ describe("handler", () => {
       },
     },
     internal: {
+      tools: [lookupOrder],
       pages: [{ name: "Orders", path: "/pages/orders" }],
     },
   });
 
-  it("handles tool_call requests", async () => {
+  it("handles agent tool_call requests", async () => {
     const body = {
       type: "tool_call",
       conversation: {
         id: 1,
         project_id: 10,
         execution_project_id: 10,
+        started_at: "2026-03-10T00:00:00.000Z",
+        message_count: 4,
+      },
+      message: {
+        text: "Show me dinner options",
       },
       channel: "whatsapp",
-      agent: "customer",
+      target: {
+        type: "agent",
+        agent: "customer",
+      },
       tool: {
         name: "get_menu",
         input: { category: "dinner" },
@@ -109,11 +128,45 @@ describe("handler", () => {
 
     expect(state.statusCode).toBe(200);
     expect(state.body).toEqual({
-      ok: true,
-      result: {
-        items: [],
-        category: "dinner",
+      items: [],
+      category: "dinner",
+    });
+  });
+
+  it("handles internal tool_call requests", async () => {
+    const body = {
+      type: "tool_call",
+      conversation: {
+        id: 1,
+        project_id: 10,
+        execution_project_id: 10,
+        started_at: "2026-03-10T00:00:00.000Z",
+        message_count: 2,
       },
+      message: {
+        text: "Where is order 123?",
+      },
+      channel: "whatsapp",
+      target: {
+        type: "internal",
+      },
+      tool: {
+        name: "lookup_order",
+        input: { orderId: "123" },
+      },
+      account: null,
+      user: null,
+    };
+
+    const req = createSignedRequest(apiKey, body);
+    const { res, state } = createMockResponse();
+
+    await sdk.handler()(req, res);
+
+    expect(state.statusCode).toBe(200);
+    expect(state.body).toEqual({
+      orderId: "123",
+      status: "ready",
     });
   });
 
@@ -140,8 +193,70 @@ describe("handler", () => {
         {
           name: "get_menu",
           description: "Return menu data",
+          input: {
+            type: "object",
+            properties: {
+              category: {
+                type: "string",
+              },
+            },
+            additionalProperties: false,
+          },
         },
       ],
+    });
+  });
+
+  it("returns a coded error when tool output is not an object", async () => {
+    const badSdk = new Konsier({
+      apiKey,
+      agents: {
+        customer: {
+          systemPrompt: "Support",
+          tools: [
+            Konsier.tool({
+              name: "bad_output",
+              description: "Returns a string",
+              input: z.object({}),
+              handler: async () => "bad" as never,
+            }),
+          ],
+        },
+      },
+    });
+
+    const body = {
+      type: "tool_call",
+      conversation: {
+        id: 1,
+        project_id: 10,
+        execution_project_id: 10,
+        started_at: "2026-03-10T00:00:00.000Z",
+        message_count: 1,
+      },
+      message: {},
+      channel: "whatsapp",
+      target: {
+        type: "agent",
+        agent: "customer",
+      },
+      tool: {
+        name: "bad_output",
+        input: {},
+      },
+      account: null,
+      user: null,
+    };
+
+    const req = createSignedRequest(apiKey, body);
+    const { res, state } = createMockResponse();
+
+    await badSdk.handler()(req, res);
+
+    expect(state.statusCode).toBe(500);
+    expect(state.body).toEqual({
+      error: "Tool handlers must return a JSON object.",
+      code: "INVALID_TOOL_OUTPUT",
     });
   });
 

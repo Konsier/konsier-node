@@ -1,6 +1,13 @@
 import { Konsier } from "../src";
 
-describe("send and linkUser", () => {
+describe("sendMessage and linkUser", () => {
+  const originalBaseUrl = process.env.KONSIER_API_BASE_URL;
+
+  afterEach(() => {
+    process.env.KONSIER_API_BASE_URL = originalBaseUrl;
+    vi.restoreAllMocks();
+  });
+
   it("calls Cloud message and link endpoints", async () => {
     const fetchMock = vi.fn(async () => {
       return new Response(JSON.stringify({ ok: true }), {
@@ -9,9 +16,10 @@ describe("send and linkUser", () => {
       });
     });
 
+    vi.stubGlobal("fetch", fetchMock);
+
     const sdk = new Konsier({
       apiKey: "k_test_123",
-      fetchImpl: fetchMock as unknown as typeof fetch,
       agents: {
         customer: {
           systemPrompt: "Support",
@@ -20,7 +28,7 @@ describe("send and linkUser", () => {
       },
     });
 
-    await sdk.send({
+    await sdk.sendMessage({
       userId: "eu_1",
       text: "hello",
     });
@@ -34,12 +42,12 @@ describe("send and linkUser", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
-      "https://api.konsier.com/api/messages/send",
+      "http://localhost:3000/api/messages/send",
       expect.any(Object),
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
-      "https://api.konsier.com/api/end-users/link",
+      "http://localhost:3000/api/end-users/link",
       expect.any(Object),
     );
   });

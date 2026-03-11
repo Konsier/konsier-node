@@ -1,4 +1,7 @@
-import { createKonsierSignature } from "../src/protocol/signatures";
+import {
+  createKonsierSignature,
+  createPageContextPayload,
+} from "../src/protocol/signatures";
 import { Konsier } from "../src";
 
 function createMockResponse() {
@@ -43,7 +46,20 @@ describe("verifyPage", () => {
     const signature = createKonsierSignature({
       apiKey,
       timestamp,
-      payload: pagePath,
+      payload: createPageContextPayload({
+        pagePath,
+        projectId: "10",
+        account: {
+          id: "10",
+          name: "Acme",
+          metadata: { restaurantId: "r_1" },
+        },
+        user: {
+          id: "u_1",
+          email: "owner@acme.com",
+          name: "Owner",
+        },
+      }),
     });
 
     const req: Record<string, unknown> = {

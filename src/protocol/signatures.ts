@@ -88,3 +88,37 @@ export function verifyKonsierSignature(input: {
     return { ok: false, reason: "SIGNATURE_PARSE_ERROR" };
   }
 }
+
+export function createPageContextPayload(input: {
+  pagePath: string;
+  projectId?: string | null;
+  account?: {
+    id?: string | null;
+    name?: string | null;
+    metadata?: Record<string, unknown> | null;
+  } | null;
+  user?: {
+    id?: string | null;
+    email?: string | null;
+    name?: string | null;
+  } | null;
+}): string {
+  return JSON.stringify({
+    pagePath: input.pagePath,
+    projectId: input.projectId ?? null,
+    account: input.account
+      ? {
+          id: input.account.id ?? null,
+          name: input.account.name ?? null,
+          metadata: input.account.metadata ?? {},
+        }
+      : null,
+    user: input.user
+      ? {
+          id: input.user.id ?? null,
+          email: input.user.email ?? null,
+          name: input.user.name ?? null,
+        }
+      : null,
+  });
+}

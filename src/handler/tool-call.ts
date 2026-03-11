@@ -1,4 +1,4 @@
-import { asKonsierError } from "../errors";
+import { KonsierError } from "../errors";
 import type {
   InboundAccount,
   InboundUser,
@@ -8,16 +8,30 @@ import type {
 import type {
   Account,
   AgentConfig,
+  Attachment,
   EndUser,
+  InternalDefinition,
+  JsonObject,
   SendInput,
   ToolContext,
 } from "../types";
+
+const CHANNELS = new Set<ToolCallRequest["channel"]>([
+  "telegram",
+  "slack",
+  "discord",
+  "whatsapp",
+  "email",
+  "sms",
+  "konsier",
+]);
 
 export interface ToolCallDependencies {
   resolveAgentConfig: (
     agent: string,
     account: Account | null,
   ) => Promise<AgentConfig>;
+  resolveInternalDefinition: (account: Account | null) => Promise<InternalDefinition>;
   sendMessage: (input: SendInput) => Promise<void>;
 }
 
@@ -27,20 +41,15 @@ export function asToolCallRequest(payload: unknown): ToolCallRequest | null {
     return null;
   }
 
-  if (
-    typeof obj.agent !== "string" ||
-    obj.agent.trim().length === 0 ||
-    typeof obj.channel !== "string"
-  ) {
-    return null;
-  }
-
+  const target = parseTarget(obj.target);
+  const channel = parseChannel(obj.channel);
   const conversation = parseConversation(obj.conversation);
+  const message = parseMessage(obj.message);
   const tool = parseTool(obj.tool);
   const account = parseInboundAccount(obj.account);
   const user = parseInboundUser(obj.user);
 
-  if (!conversation || !tool) {
+  if (!target || !channel || !conversation || !message || !tool) {
     return null;
   }
 
@@ -55,8 +64,9 @@ export function asToolCallRequest(payload: unknown): ToolCallRequest | null {
   return {
     type: "tool_call",
     conversation,
-    channel: obj.channel as ToolCallRequest["channel"],
-    agent: obj.agent,
+    message,
+    channel,
+    target,
     tool,
     account,
     user,
@@ -67,68 +77,76 @@ export async function executeToolCallRequest(
   request: ToolCallRequest,
   dependencies: ToolCallDependencies,
 ): Promise<ToolCallResponse> {
-  try {
-    const account = normalizeAccount(request.account);
-    const agent = await dependencies.resolveAgentConfig(request.agent, account);
-    const tool = agent.tools.find((entry) => entry.name === request.tool.name);
+  const account = normalizeAccount(request.account);
+  const resolvedTool = await resolveTool(request, dependencies, account);
+  const parsedInput = resolvedTool.parseInput(request.tool.input);
+  const user = normalizeUser(request.user);
 
-    if (!tool) {
-      return {
-        ok: false,
-        error: `Tool \"${request.tool.name}\" is not registered for agent \"${request.agent}\".`,
-      };
-    }
+  const context: ToolContext = {
+    channel: request.channel,
+    agent: request.target.type === "agent" ? request.target.agent : "internal",
+    user,
+    conversation: {
+      id: String(request.conversation.id),
+      startedAt: request.conversation.started_at,
+      messageCount: request.conversation.message_count,
+    },
+    message: request.message,
+    account,
+    send: async (message) => {
+      await dependencies.sendMessage({
+        conversationId: request.conversation.id,
+        userId: user.id,
+        ...message,
+      });
+    },
+  };
 
-    const parsedInput = tool.parseInput(request.tool.input);
-
-    const user = normalizeUser(request.user);
-    const context: ToolContext = {
-      channel: request.channel,
-      agent: request.agent,
-      user,
-      conversation: {
-        id: String(request.conversation.id),
-        startedAt: new Date().toISOString(),
-        messageCount: 0,
-      },
-      message: {},
-      account,
-      send: async (message) => {
-        await dependencies.sendMessage({
-          conversationId: request.conversation.id,
-          userId: user.id,
-          ...message,
-        });
-      },
-    };
-
-    const result = await tool.handler(parsedInput, context);
-
-    return {
-      ok: true,
-      result: normalizeToolOutput(result),
-    };
-  } catch (error) {
-    const konsierError = asKonsierError(error);
-    return {
-      ok: false,
-      error: konsierError.message,
-    };
-  }
+  const result = await resolvedTool.handler(parsedInput, context);
+  return assertToolOutput(result);
 }
 
-function normalizeToolOutput(
-  output: unknown,
-): Record<string, unknown> {
-  if (!output) {
-    return {};
+async function resolveTool(
+  request: ToolCallRequest,
+  dependencies: ToolCallDependencies,
+  account: Account | null,
+) {
+  if (request.target.type === "agent") {
+    const agent = await dependencies.resolveAgentConfig(request.target.agent, account);
+    const tool = agent.tools.find((entry) => entry.name === request.tool.name);
+    if (!tool) {
+      throw new KonsierError({
+        code: "TOOL_NOT_FOUND",
+        message: `Tool "${request.tool.name}" is not registered for agent "${request.target.agent}".`,
+        statusCode: 404,
+      });
+    }
+    return tool;
   }
 
-  if (typeof output === "object" && !Array.isArray(output)) {
-    return output as Record<string, unknown>;
+  const internal = await dependencies.resolveInternalDefinition(account);
+  const tool = (internal.tools ?? []).find((entry) => entry.name === request.tool.name);
+  if (!tool) {
+    throw new KonsierError({
+      code: "TOOL_NOT_FOUND",
+      message: `Internal tool "${request.tool.name}" is not registered.`,
+      statusCode: 404,
+    });
   }
 
-  return { value: output };
+  return tool;
+}
+
+function assertToolOutput(output: unknown): JsonObject {
+  if (output && typeof output === "object" && !Array.isArray(output)) {
+    return output as JsonObject;
+  }
+
+  throw new KonsierError({
+    code: "INVALID_TOOL_OUTPUT",
+    message: "Tool handlers must return a JSON object.",
+    statusCode: 500,
+  });
 }
 
 function normalizeAccount(account: InboundAccount | null): Account | null {
@@ -174,6 +192,33 @@ function asObject(value: unknown): Record<string, unknown> | null {
   return value as Record<string, unknown>;
 }
 
+function parseTarget(value: unknown): ToolCallRequest["target"] | null {
+  const obj = asObject(value);
+  if (!obj || typeof obj.type !== "string") {
+    return null;
+  }
+
+  if (obj.type === "internal") {
+    return { type: "internal" };
+  }
+
+  if (obj.type === "agent" && typeof obj.agent === "string" && obj.agent.trim()) {
+    return {
+      type: "agent",
+      agent: obj.agent.trim(),
+    };
+  }
+
+  return null;
+}
+
+function parseChannel(value: unknown): ToolCallRequest["channel"] | null {
+  if (typeof value !== "string" || !CHANNELS.has(value as ToolCallRequest["channel"])) {
+    return null;
+  }
+  return value as ToolCallRequest["channel"];
+}
+
 function parseConversation(
   value: unknown,
 ): ToolCallRequest["conversation"] | null {
@@ -185,11 +230,15 @@ function parseConversation(
   const id = obj.id;
   const projectId = obj.project_id;
   const executionProjectId = obj.execution_project_id;
+  const startedAt = obj.started_at;
+  const messageCount = obj.message_count;
 
   if (
     typeof id !== "number" ||
     typeof projectId !== "number" ||
-    typeof executionProjectId !== "number"
+    typeof executionProjectId !== "number" ||
+    typeof startedAt !== "string" ||
+    typeof messageCount !== "number"
   ) {
     return null;
   }
@@ -198,7 +247,83 @@ function parseConversation(
     id,
     project_id: projectId,
     execution_project_id: executionProjectId,
+    started_at: startedAt,
+    message_count: messageCount,
   };
+}
+
+function parseMessage(value: unknown): ToolCallRequest["message"] | null {
+  if (value === null || value === undefined) {
+    return {};
+  }
+
+  const obj = asObject(value);
+  if (!obj) {
+    return null;
+  }
+
+  const text = obj.text;
+  const html = obj.html;
+  const attachments = obj.attachments;
+
+  if (
+    !(typeof text === "undefined" || typeof text === "string") ||
+    !(typeof html === "undefined" || typeof html === "string")
+  ) {
+    return null;
+  }
+
+  const normalized: ToolCallRequest["message"] = {};
+  if (typeof text === "string") {
+    normalized.text = text;
+  }
+  if (typeof html === "string") {
+    normalized.html = html;
+  }
+  if (typeof attachments !== "undefined") {
+    const parsedAttachments = parseAttachments(attachments);
+    if (!parsedAttachments) {
+      return null;
+    }
+    normalized.attachments = parsedAttachments;
+  }
+
+  return normalized;
+}
+
+function parseAttachments(value: unknown): Attachment[] | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+
+  const attachments: Attachment[] = [];
+  for (const item of value) {
+    const record = asObject(item);
+    if (!record) {
+      return null;
+    }
+
+    if (
+      typeof record.url !== "string" ||
+      !["image", "file", "video", "audio"].includes(String(record.type))
+    ) {
+      return null;
+    }
+
+    const attachment: Attachment = {
+      url: record.url,
+      type: record.type as Attachment["type"],
+    };
+    if (typeof record.name === "string") {
+      attachment.name = record.name;
+    }
+    if (typeof record.mimeType === "string") {
+      attachment.mimeType = record.mimeType;
+    }
+    attachments.push(attachment);
+  }
+
+  return attachments;
 }
 
 function parseTool(value: unknown): ToolCallRequest["tool"] | null {
@@ -284,7 +409,12 @@ function parseInboundUser(value: unknown): InboundUser | null {
     return null;
   }
 
-  if (!(metadata === null || (typeof metadata === "object" && !Array.isArray(metadata)))) {
+  if (
+    !(
+      metadata === null ||
+      (typeof metadata === "object" && !Array.isArray(metadata))
+    )
+  ) {
     return null;
   }
 

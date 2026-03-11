@@ -22,7 +22,7 @@ export async function linkUser(
     });
   }
 
-  await client.post("/api/end-users/link", {
+  await client.post("/end-users/link", {
     userId: input.userId,
     externalId: input.externalId,
     metadata: input.metadata ?? {},

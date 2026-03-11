@@ -1,6 +1,11 @@
 import type { Tool } from "./tool";
 
 export type MaybePromise<T> = T | Promise<T>;
+export type JsonPrimitive = string | number | boolean | null;
+export type JsonValue = JsonPrimitive | JsonObject | JsonValue[];
+export interface JsonObject {
+  [key: string]: JsonValue;
+}
 
 export type Channel =
   | "telegram"
@@ -91,7 +96,7 @@ export interface AgentConfig {
   name?: string;
   description?: string | null;
   systemPrompt: string;
-  tools: Array<Tool<any, Record<string, unknown>>>;
+  tools: Array<Tool<any, JsonObject>>;
   events?: AgentEvents;
 }
 
@@ -110,8 +115,12 @@ export interface PageDefinition {
 }
 
 export interface InternalDefinition {
-  tools?: Array<Tool<any, Record<string, unknown>>>;
+  tools?: Array<Tool<any, JsonObject>>;
   pages?: PageDefinition[];
+}
+
+export interface MountableApp {
+  use: (...args: any[]) => unknown;
 }
 
 export type InternalContext = ManifestContext;
@@ -122,11 +131,10 @@ export type InternalEntry = InternalDefinition | InternalResolver;
 
 export interface KonsierOptions {
   apiKey: string;
-  agents: Record<string, AgentEntry>;
+  agents?: Record<string, AgentEntry>;
   internal?: InternalEntry;
-  maxRetries?: number;
-  allowedClockSkewMs?: number;
-  fetchImpl?: typeof fetch;
+  endpointUrl?: string;
+  debug?: boolean;
 }
 
 export interface HandlerOptions {
@@ -145,7 +153,6 @@ export interface HttpRequestLike {
   method?: string;
   headers: HeadersLike;
   body?: unknown;
-  [key: string]: unknown;
 }
 
 export interface HttpResponseLike {
@@ -168,4 +175,24 @@ export interface PageAuthContext {
     email?: string;
     name?: string;
   };
+}
+
+declare module "http" {
+  interface IncomingMessage {
+    rawBody?: Buffer;
+  }
+}
+
+declare module "node:http" {
+  interface IncomingMessage {
+    rawBody?: Buffer;
+  }
+}
+
+declare global {
+  namespace Express {
+    interface Request {
+      konsier?: PageAuthContext;
+    }
+  }
 }

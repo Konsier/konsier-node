@@ -1,0 +1,12 @@
+<li class="task {{taskStateClass}}">
+  <form method="post" action="/tasks/{{encodedTaskId}}/toggle" class="task-check">
+    <button type="submit" class="check-btn" title="{{toggleLabel}}">&#10003;</button>
+  </form>
+  <div class="task-body">
+    <div class="task-title">{{title}}</div>
+    <div class="badge badge-{{priority}}">{{priority}}</div>
+  </div>
+  <form method="post" action="/tasks/{{encodedTaskId}}/delete" class="task-delete">
+    <button type="submit" class="delete-btn" title="Delete">&times;</button>
+  </form>
+</li>

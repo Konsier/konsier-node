@@ -5,11 +5,7 @@ import {
 } from "../constants";
 import { asKonsierError } from "../errors";
 import { getHeaderValue, verifyKonsierSignature } from "../protocol/signatures";
-import type {
-  HttpRequestLike,
-  HttpResponseLike,
-  NextFunction,
-} from "../types";
+import type { HttpRequestLike, HttpResponseLike, NextFunction } from "../types";
 import type { ManifestResponse } from "../protocol/inbound";
 import { asResolveAgentRequest, resolveAgentRequest } from "./resolve-agent";
 import { asToolCallRequest, executeToolCallRequest } from "./tool-call";
@@ -19,6 +15,7 @@ export interface HandlerDependencies {
   apiKey: string;
   allowedClockSkewMs?: number;
   rawBodyProperty?: string;
+  debug?: boolean;
   handleToolCall: Parameters<typeof executeToolCallRequest>[1];
   handleResolveAgent: Parameters<typeof resolveAgentRequest>[1];
   handleManifest: {
@@ -30,6 +27,7 @@ export function createHandler(dependencies: HandlerDependencies) {
   const rawBodyProperty = dependencies.rawBodyProperty ?? "rawBody";
   const allowedClockSkewMs =
     dependencies.allowedClockSkewMs ?? DEFAULT_ALLOWED_CLOCK_SKEW_MS;
+  const debug = Boolean(dependencies.debug);
 
   return async function konsierHandler(
     req: HttpRequestLike,
@@ -38,6 +36,7 @@ export function createHandler(dependencies: HandlerDependencies) {
   ): Promise<void> {
     try {
       if ((req.method ?? "POST").toUpperCase() !== "POST") {
+        debugLog(debug, "method rejected", { method: req.method ?? "POST" });
         sendJson(res, 405, { error: "Method not allowed" });
         return;
       }
@@ -46,6 +45,7 @@ export function createHandler(dependencies: HandlerDependencies) {
       const timestamp = getHeaderValue(req.headers, HEADER_TIMESTAMP);
 
       if (!signature || !timestamp) {
+        debugLog(debug, "missing signature headers");
         sendJson(res, 401, { error: "Missing signature headers" });
         return;
       }
@@ -60,15 +60,23 @@ export function createHandler(dependencies: HandlerDependencies) {
       });
 
       if (!verified.ok) {
+        debugLog(debug, "signature verification failed", {
+          reason: verified.reason,
+        });
         sendJson(res, 401, { error: verified.reason });
         return;
       }
 
       const payload = parseBody(req.body, rawBody);
       if (!payload) {
+        debugLog(debug, "invalid JSON body");
         sendJson(res, 400, { error: "Invalid JSON request body" });
         return;
       }
+
+      debugLog(debug, "request received", {
+        type: payload.type,
+      });
 
       const toolCall = asToolCallRequest(payload);
       if (toolCall) {
@@ -76,7 +84,19 @@ export function createHandler(dependencies: HandlerDependencies) {
           toolCall,
           dependencies.handleToolCall,
         );
+        debugLog(debug, "tool_call handled", {
+          agent: toolCall.target.type === "agent" ? toolCall.target.agent : null,
+          tool: toolCall.tool,
+        });
         sendJson(res, 200, response);
+        return;
+      }
+      if (payload.type === "tool_call") {
+        debugLog(debug, "invalid tool_call payload");
+        sendJson(res, 400, {
+          error: "Invalid tool_call request",
+          code: "INVALID_TOOL_CALL_REQUEST",
+        });
         return;
       }
 
@@ -86,7 +106,18 @@ export function createHandler(dependencies: HandlerDependencies) {
           resolveAgent,
           dependencies.handleResolveAgent,
         );
+        debugLog(debug, "resolve_agent handled", {
+          agent: resolveAgent.agent,
+        });
         sendJson(res, 200, response);
+        return;
+      }
+      if (payload.type === "resolve_agent") {
+        debugLog(debug, "invalid resolve_agent payload");
+        sendJson(res, 400, {
+          error: "Invalid resolve_agent request",
+          code: "INVALID_RESOLVE_AGENT_REQUEST",
+        });
         return;
       }
 
@@ -95,12 +126,30 @@ export function createHandler(dependencies: HandlerDependencies) {
         const response = await dependencies.handleManifest.listManifest(
           normalizeManifestAccount(manifest.account),
         );
+        debugLog(debug, "manifest handled", {
+          accountId: manifest.account?.id ?? null,
+          agentCount: response.agents.length,
+          pageCount: response.internal.pages.length,
+          toolCount: response.internal.tools.length,
+        });
         sendJson(res, 200, response);
         return;
       }
+      if (payload.type === "manifest") {
+        debugLog(debug, "invalid manifest payload");
+        sendJson(res, 400, {
+          error: "Invalid manifest request",
+          code: "INVALID_MANIFEST_REQUEST",
+        });
+        return;
+      }
 
+      debugLog(debug, "unknown request type", { type: payload.type });
       sendJson(res, 400, { error: "Unknown request type" });
     } catch (error) {
+      debugLog(debug, "handler error", {
+        error: error instanceof Error ? error.message : "Unknown error",
+      });
       const parsed = asKonsierError(error);
       sendJson(res, parsed.statusCode, {
         error: parsed.message,
@@ -113,9 +162,25 @@ export function createHandler(dependencies: HandlerDependencies) {
   };
 }
 
-function asManifestRequest(
-  payload: unknown,
-): { type: "manifest"; account: { id: string | number; name: string; metadata: Record<string, unknown> } | null } | null {
+function debugLog(
+  debug: boolean,
+  message: string,
+  meta?: Record<string, unknown>,
+): void {
+  if (!debug || process.env.NODE_ENV !== "development") {
+    return;
+  }
+  console.log("[konsier] handler", meta ? { message, ...meta } : { message });
+}
+
+function asManifestRequest(payload: unknown): {
+  type: "manifest";
+  account: {
+    id: string | number;
+    name: string;
+    metadata: Record<string, unknown>;
+  } | null;
+} | null {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
     return null;
   }
@@ -136,9 +201,11 @@ function asManifestRequest(
   };
 }
 
-function parseManifestAccount(
-  value: unknown,
-): { id: string | number; name: string; metadata: Record<string, unknown> } | null {
+function parseManifestAccount(value: unknown): {
+  id: string | number;
+  name: string;
+  metadata: Record<string, unknown>;
+} | null {
   if (value === null || value === undefined) {
     return null;
   }
@@ -166,7 +233,11 @@ function parseManifestAccount(
 }
 
 function normalizeManifestAccount(
-  account: { id: string | number; name: string; metadata: Record<string, unknown> } | null,
+  account: {
+    id: string | number;
+    name: string;
+    metadata: Record<string, unknown>;
+  } | null,
 ): Account | null {
   if (!account) {
     return null;
@@ -180,7 +251,8 @@ function normalizeManifestAccount(
 }
 
 function extractRawBody(req: HttpRequestLike, rawBodyProperty: string): string {
-  const raw = req[rawBodyProperty] ?? req.body;
+  const raw =
+    (req as unknown as Record<string, unknown>)[rawBodyProperty] ?? req.body;
 
   if (Buffer.isBuffer(raw)) {
     return raw.toString("utf8");
@@ -197,7 +269,10 @@ function extractRawBody(req: HttpRequestLike, rawBodyProperty: string): string {
   return "";
 }
 
-function parseBody(body: unknown, rawBody: string): Record<string, unknown> | null {
+function parseBody(
+  body: unknown,
+  rawBody: string,
+): Record<string, unknown> | null {
   if (body && typeof body === "object" && !Array.isArray(body)) {
     return body as Record<string, unknown>;
   }
