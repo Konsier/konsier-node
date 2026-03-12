@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## v0.2.1 - 2026-03-12
+
+### Documentation
+
+- add changelog for current releases (0bb9cc3)
+
 ## v0.2.0 - 2026-03-12
 
 ### Features
