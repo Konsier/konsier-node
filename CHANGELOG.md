@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## v0.2.2 - 2026-03-12
+
+### Refactors
+
+- rename page auth types for page requests (8641016)
+
 ## v0.2.1 - 2026-03-12
 
 ### Documentation
