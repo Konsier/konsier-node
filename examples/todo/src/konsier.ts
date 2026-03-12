@@ -1,4 +1,5 @@
 import { Konsier } from "konsier";
+import { verifyKonsierPage } from "konsier/express";
 import { z } from "zod";
 
 import { addTask, completeTask, deleteTask, listTasks } from "./state";
@@ -86,4 +87,4 @@ export const konsier = new Konsier({
     pages: [{ name: "Tasks", path: "/pages/tasks" }],
   },
 });
-export const pageVerifier = konsier.verifyPage();
+export const pageVerifier = verifyKonsierPage(konsier);

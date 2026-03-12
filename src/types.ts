@@ -34,10 +34,71 @@ export interface SendInput extends SendMessage {
   conversationId?: string | number;
 }
 
-export interface LinkUserInput {
+export interface UserLinkInput {
   userId: string;
   externalId: string;
   metadata?: Record<string, unknown>;
+}
+
+export interface UserGetInput {
+  userId: string;
+}
+
+export interface AccountLinkInput {
+  accountId: string;
+  externalId: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface AccountGetInput {
+  accountId: string;
+}
+
+export interface ConnectionStartInput {
+  redirect: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface ConnectionStartResult {
+  url: string;
+  expiresAt: string;
+}
+
+export interface SdkUser {
+  id: string;
+  externalId: string | null;
+  metadata: Record<string, unknown>;
+  firstName: string | null;
+  lastName: string | null;
+  email: string | null;
+  phoneNumber: string | null;
+  displayName: string | null;
+}
+
+export interface SdkAccount {
+  id: string;
+  name: string;
+  logoUrl: string | null;
+  externalId: string | null;
+  metadata: Record<string, unknown>;
+  connectedAt: string;
+  linkedAgents: Array<{
+    ref: string;
+    agentId: string;
+    agentName: string;
+  }>;
+  internal: {
+    pages: string[];
+    tools: string[];
+  };
+}
+
+export interface ConnectionCompleteInput {
+  token: string;
+}
+
+export interface ConnectionCompleteResult {
+  account: SdkAccount;
 }
 
 export interface Account {
@@ -119,10 +180,6 @@ export interface InternalDefinition {
   pages?: PageDefinition[];
 }
 
-export interface MountableApp {
-  use: (...args: any[]) => unknown;
-}
-
 export type InternalContext = ManifestContext;
 export type InternalResolver = (
   ctx: InternalContext,
@@ -135,10 +192,6 @@ export interface KonsierOptions {
   internal?: InternalEntry;
   endpointUrl?: string;
   debug?: boolean;
-}
-
-export interface HandlerOptions {
-  rawBodyProperty?: string;
 }
 
 export interface ManifestContext {

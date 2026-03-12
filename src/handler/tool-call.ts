@@ -27,6 +27,7 @@ const CHANNELS = new Set<ToolCallRequest["channel"]>([
 ]);
 
 export interface ToolCallDependencies {
+  debug?: boolean;
   resolveAgentConfig: (
     agent: string,
     account: Account | null,
@@ -77,10 +78,21 @@ export async function executeToolCallRequest(
   request: ToolCallRequest,
   dependencies: ToolCallDependencies,
 ): Promise<ToolCallResponse> {
+  const debug = Boolean(dependencies.debug);
   const account = normalizeAccount(request.account);
   const resolvedTool = await resolveTool(request, dependencies, account);
   const parsedInput = resolvedTool.parseInput(request.tool.input);
   const user = normalizeUser(request.user);
+
+  debugLog(debug, "tool execution started", {
+    target: request.target,
+    tool: request.tool.name,
+    input: parsedInput,
+    conversationId: request.conversation.id,
+    channel: request.channel,
+    account,
+    user,
+  });
 
   const context: ToolContext = {
     channel: request.channel,
@@ -94,6 +106,13 @@ export async function executeToolCallRequest(
     message: request.message,
     account,
     send: async (message) => {
+      debugLog(debug, "tool context.send invoked", {
+        target: request.target,
+        tool: request.tool.name,
+        conversationId: request.conversation.id,
+        userId: user.id,
+        message,
+      });
       await dependencies.sendMessage({
         conversationId: request.conversation.id,
         userId: user.id,
@@ -102,8 +121,30 @@ export async function executeToolCallRequest(
     },
   };
 
-  const result = await resolvedTool.handler(parsedInput, context);
-  return assertToolOutput(result);
+  try {
+    const result = await resolvedTool.handler(parsedInput, context);
+    const output = assertToolOutput(result);
+    debugLog(debug, "tool execution succeeded", {
+      target: request.target,
+      tool: request.tool.name,
+      input: parsedInput,
+      output,
+      conversationId: request.conversation.id,
+      channel: request.channel,
+    });
+    return output;
+  } catch (error) {
+    debugLog(debug, "tool execution failed", {
+      target: request.target,
+      tool: request.tool.name,
+      input: parsedInput,
+      conversationId: request.conversation.id,
+      channel: request.channel,
+      error: error instanceof Error ? error.message : "Unknown error",
+      errorDetails: error,
+    });
+    throw error;
+  }
 }
 
 async function resolveTool(
@@ -183,6 +224,17 @@ function normalizeUser(user: InboundUser | null): EndUser {
   }
 
   return normalized;
+}
+
+function debugLog(
+  debug: boolean,
+  message: string,
+  meta?: Record<string, unknown>,
+): void {
+  if (!debug || process.env.NODE_ENV !== "development") {
+    return;
+  }
+  console.log("[konsier] tool_call", meta ? { message, ...meta } : { message });
 }
 
 function asObject(value: unknown): Record<string, unknown> | null {

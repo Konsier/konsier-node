@@ -1,29 +1,42 @@
 import { DEFAULT_ALLOWED_CLOCK_SKEW_MS, ENV_CLOUD_BASE_URL } from "./constants";
-import { linkUser as linkCloudUser } from "./cloud/link-user";
+import {
+  completeConnection,
+  getAccount,
+  getUser,
+  linkAccount as linkCloudAccount,
+  linkUser as linkCloudUser,
+  listAccounts,
+  startConnection,
+} from "./cloud/link-user";
 import { CloudApiClient, resolveCloudBaseUrl } from "./cloud/http";
 import { sendMessage } from "./cloud/send";
-import { KonsierError, toErrorMessage } from "./errors";
+import { KonsierError } from "./errors";
 import { createHandler } from "./handler";
 import { createVerifyPageMiddleware } from "./page/verify";
 import { createTool, type Tool } from "./tool";
 import type {
   Account,
+  AccountGetInput,
   AgentConfig,
   AgentEntry,
   AgentManifestEntry,
-  HandlerOptions,
+  AccountLinkInput,
+  ConnectionCompleteInput,
+  ConnectionCompleteResult,
+  ConnectionStartInput,
+  ConnectionStartResult,
   InternalDefinition,
   InternalEntry,
   JsonObject,
   KonsierOptions,
-  LinkUserInput,
   ManifestContext,
-  MountableApp,
   PageDefinition,
   SendInput,
+  SdkAccount,
+  SdkUser,
+  UserGetInput,
+  UserLinkInput,
 } from "./types";
-
-const REGISTRATION_RETRY_DELAYS_MS = [5_000, 15_000, 60_000] as const;
 
 function shouldDebugLog(debug: boolean): boolean {
   return debug && process.env.NODE_ENV === "development";
@@ -89,7 +102,7 @@ function endpointPath(endpointUrl: string): string {
   return pathname || "/";
 }
 
-function createJsonBodyMiddleware(rawBodyProperty: string) {
+export function createJsonBodyMiddleware(rawBodyProperty: string) {
   return function jsonBodyMiddleware(
     req: {
       body?: unknown;
@@ -174,6 +187,21 @@ function createJsonBodyMiddleware(rawBodyProperty: string) {
 
 export class Konsier {
   static tool = createTool;
+  readonly users: {
+    get: (input: UserGetInput) => Promise<SdkUser>;
+    link: (input: UserLinkInput) => Promise<SdkUser>;
+  };
+  readonly accounts: {
+    list: () => Promise<SdkAccount[]>;
+    get: (input: AccountGetInput) => Promise<SdkAccount>;
+    link: (input: AccountLinkInput) => Promise<SdkAccount>;
+  };
+  readonly connections: {
+    start: (input: ConnectionStartInput) => Promise<ConnectionStartResult>;
+    complete: (
+      input: ConnectionCompleteInput,
+    ) => Promise<ConnectionCompleteResult>;
+  };
 
   private readonly apiKey: string;
   private readonly agents: Record<string, AgentEntry>;
@@ -182,9 +210,6 @@ export class Konsier {
   private readonly allowedClockSkewMs: number;
   private readonly endpointUrl: string | null;
   private readonly debug: boolean;
-  private mountedPath: string | null = null;
-  private registrationTimer: ReturnType<typeof setTimeout> | null = null;
-  private registrationComplete = false;
 
   constructor(options: KonsierOptions) {
     if (!options.apiKey?.trim()) {
@@ -221,6 +246,33 @@ export class Konsier {
     };
 
     this.cloudClient = new CloudApiClient(cloudClientOptions);
+    this.users = {
+      get: async (input) => {
+        return getUser(this.cloudClient, input);
+      },
+      link: async (input) => {
+        return linkCloudUser(this.cloudClient, input);
+      },
+    };
+    this.accounts = {
+      list: async () => {
+        return listAccounts(this.cloudClient);
+      },
+      get: async (input) => {
+        return getAccount(this.cloudClient, input);
+      },
+      link: async (input) => {
+        return linkCloudAccount(this.cloudClient, input);
+      },
+    };
+    this.connections = {
+      start: async (input) => {
+        return startConnection(this.cloudClient, input);
+      },
+      complete: async (input) => {
+        return completeConnection(this.cloudClient, input);
+      },
+    };
 
     this.validateAgentRegistry();
     this.validateInternalRegistry();
@@ -242,12 +294,33 @@ export class Konsier {
     }
   }
 
-  handler(options?: HandlerOptions) {
-    const handlerDependencies: Parameters<typeof createHandler>[0] = {
+  verifyPage() {
+    return createVerifyPageMiddleware({
+      apiKey: this.apiKey,
+      allowedClockSkewMs: this.allowedClockSkewMs,
+      debug: this.debug,
+    });
+  }
+
+  webhookPath(): string {
+    if (!this.endpointUrl) {
+      throw new KonsierError({
+        code: "ENDPOINT_URL_REQUIRED",
+        message: "Konsier endpointUrl is required for webhook adapters.",
+        statusCode: 400,
+      });
+    }
+
+    return endpointPath(this.endpointUrl);
+  }
+
+  webhookHandler() {
+    return createHandler({
       apiKey: this.apiKey,
       allowedClockSkewMs: this.allowedClockSkewMs,
       debug: this.debug,
       handleToolCall: {
+        debug: this.debug,
         resolveAgentConfig: (agent, account) =>
           this.resolveAgentConfig(agent, account),
         resolveInternalDefinition: (account) =>
@@ -261,79 +334,25 @@ export class Konsier {
       handleManifest: {
         listManifest: (account) => this.listManifest({ account }),
       },
-    };
-
-    if (options?.rawBodyProperty !== undefined) {
-      handlerDependencies.rawBodyProperty = options.rawBodyProperty;
-    }
-
-    return createHandler(handlerDependencies);
-  }
-
-  verifyPage() {
-    return createVerifyPageMiddleware({
-      apiKey: this.apiKey,
-      allowedClockSkewMs: this.allowedClockSkewMs,
-      debug: this.debug,
     });
-  }
-
-  mount(app: MountableApp): void {
-    if (!this.endpointUrl) {
-      throw new KonsierError({
-        code: "ENDPOINT_URL_REQUIRED",
-        message: "Konsier mount() requires endpointUrl to be configured.",
-        statusCode: 400,
-      });
-    }
-
-    if (this.mountedPath) {
-      if (shouldDebugLog(this.debug)) {
-        console.log("[konsier] mount skipped", { path: this.mountedPath });
-      }
-      return;
-    }
-
-    const path = endpointPath(this.endpointUrl);
-    app.use(path, createJsonBodyMiddleware("rawBody"));
-    app.use(path, this.handler());
-    this.mountedPath = path;
-
-    if (shouldDebugLog(this.debug)) {
-      console.log("[konsier] mounted", {
-        path,
-        endpointUrl: this.endpointUrl,
-      });
-    }
-
-    void this.startRegistration();
   }
 
   async sendMessage(input: SendInput): Promise<void> {
     await sendMessage(this.cloudClient, input);
   }
 
-  async linkUser(input: LinkUserInput): Promise<void> {
-    await linkCloudUser(this.cloudClient, input);
-  }
-
-  async refresh(): Promise<void> {
+  async sync(): Promise<void> {
     const payload =
       this.endpointUrl === null ? {} : { endpoint_url: this.endpointUrl };
 
     if (shouldDebugLog(this.debug)) {
-      console.log("[konsier] refresh requested", payload);
+      console.log("[konsier] sync requested", payload);
     }
 
     await this.cloudClient.post("/agents/refresh", payload);
-    this.registrationComplete = true;
-    if (this.registrationTimer) {
-      clearTimeout(this.registrationTimer);
-      this.registrationTimer = null;
-    }
 
     if (shouldDebugLog(this.debug)) {
-      console.log("[konsier] refresh succeeded", payload);
+      console.log("[konsier] sync succeeded", payload);
     }
   }
 
@@ -578,51 +597,5 @@ export class Konsier {
         statusCode,
       });
     }
-  }
-
-  private async startRegistration(attempt = 0): Promise<void> {
-    if (this.registrationComplete) {
-      return;
-    }
-
-    try {
-      await this.refresh();
-    } catch (error) {
-      const shouldRetry = this.shouldRetryRegistration(error);
-      const delay =
-        REGISTRATION_RETRY_DELAYS_MS[
-          Math.min(attempt, REGISTRATION_RETRY_DELAYS_MS.length - 1)
-        ];
-
-      if (shouldDebugLog(this.debug)) {
-        console.warn("[konsier] refresh failed", {
-          attempt: attempt + 1,
-          endpointUrl: this.endpointUrl,
-          error: toErrorMessage(error),
-          retrying: shouldRetry,
-          retryInMs: shouldRetry ? delay : null,
-        });
-      }
-
-      if (!shouldRetry) {
-        return;
-      }
-
-      this.registrationTimer = setTimeout(() => {
-        void this.startRegistration(attempt + 1);
-      }, delay);
-    }
-  }
-
-  private shouldRetryRegistration(error: unknown): boolean {
-    if (error instanceof KonsierError) {
-      return error.statusCode >= 500;
-    }
-
-    if (error instanceof TypeError) {
-      return true;
-    }
-
-    return error instanceof Error && error.name === "AbortError";
   }
 }

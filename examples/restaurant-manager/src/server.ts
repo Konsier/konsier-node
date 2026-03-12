@@ -16,37 +16,84 @@ import {
 } from "./views/pages";
 
 const port = Number(process.env.PORT ?? "3004");
-const konsierHandler = sdk.handler();
+
+type KonsierRequest = IncomingMessage & {
+  body?: unknown;
+  rawBody?: Buffer;
+  konsier?: PageAuthContext;
+};
+
+type KonsierMiddleware = (
+  req: KonsierRequest,
+  res: ReturnType<typeof responseLike>,
+  next?: (error?: unknown) => void,
+) => void | Promise<void>;
+
+const webhookHandler = sdk.webhookHandler() as KonsierMiddleware;
+
+async function runKonsierRoute(
+  req: KonsierRequest,
+  res: ReturnType<typeof responseLike>,
+): Promise<boolean> {
+  const url = new URL(
+    req.url ?? "/",
+    `http://${req.headers.host ?? "localhost"}`,
+  );
+
+  if (req.method !== "POST" || url.pathname !== sdk.webhookPath()) {
+    return false;
+  }
+
+  const rawBody = await readBody(req);
+  req.rawBody = Buffer.from(rawBody, "utf8");
+  req.body = rawBody;
+
+  await webhookHandler(req, res);
+
+  return true;
+}
+
+function appOrigin(req: IncomingMessage): string {
+  const forwardedProto = req.headers["x-forwarded-proto"];
+  const proto =
+    typeof forwardedProto === "string" && forwardedProto.trim()
+      ? forwardedProto.trim().split(",")[0]
+      : "http";
+  return `${proto}://${req.headers.host ?? `localhost:${port}`}`;
+}
+
+async function homePageInput(origin: string, status?: string) {
+  try {
+    const result = await sdk.connections.start({
+      redirect: `${origin}/connect/callback`,
+      metadata: {},
+    });
+
+    return {
+      connectUrl: result.url,
+      connectStatus: status ?? null,
+    };
+  } catch (error) {
+    const message =
+      error instanceof Error && error.message
+        ? error.message
+        : "Unable to generate connect link.";
+    return {
+      connectUrl: null,
+      connectStatus: status ?? message,
+    };
+  }
+}
 
 const server = createServer(async (req, res) => {
   const url = new URL(
     req.url ?? "/",
     `http://${req.headers.host ?? "localhost"}`,
   );
+  const response = responseLike(res);
+  const konsierReq = req as KonsierRequest;
 
-  if (req.method === "POST" && url.pathname === "/konsier") {
-    const rawBody = await readBody(req);
-    let parsedBody: unknown = undefined;
-    try {
-      parsedBody = rawBody ? JSON.parse(rawBody) : undefined;
-    } catch {
-      parsedBody = undefined;
-    }
-
-    await konsierHandler(
-      {
-        method: req.method,
-        headers: req.headers,
-        body: parsedBody,
-        rawBody,
-      } as {
-        method?: string;
-        headers: IncomingMessage["headers"];
-        body?: unknown;
-        rawBody?: string;
-      },
-      responseLike(res),
-    );
+  if (await runKonsierRoute(konsierReq, response)) {
     return;
   }
 
@@ -56,7 +103,52 @@ const server = createServer(async (req, res) => {
   }
 
   if (req.method === "GET" && url.pathname === "/") {
-    sendHtml(res, 200, renderHomePage());
+    sendHtml(res, 200, renderHomePage(await homePageInput(appOrigin(req))));
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/connect/callback") {
+    const token = (url.searchParams.get("token") ?? "").trim();
+    if (!token) {
+      sendHtml(
+        res,
+        400,
+        renderHomePage(
+          await homePageInput(appOrigin(req), "Missing connection token."),
+        ),
+      );
+      return;
+    }
+
+    try {
+      const result = await sdk.connections.complete({ token });
+      sendHtml(
+        res,
+        200,
+        renderHomePage(
+          await homePageInput(
+            appOrigin(req),
+            `Connected ${result.account.name}.`,
+          ),
+        ),
+      );
+    } catch (error) {
+      const code =
+        error && typeof error === "object" && "code" in error
+          ? String((error as { code?: unknown }).code ?? "")
+          : "";
+      const status =
+        code === "CONNECT_CANCELLED"
+          ? "Connection cancelled."
+          : code === "CONNECT_EXPIRED"
+            ? "Connection expired. Start again."
+            : code === "CONNECT_INVALID_TOKEN"
+              ? "Invalid connection token."
+              : error instanceof Error && error.message
+                ? error.message
+                : "Failed to complete connection.";
+      sendHtml(res, 400, renderHomePage(await homePageInput(appOrigin(req), status)));
+    }
     return;
   }
 
@@ -103,7 +195,7 @@ const server = createServer(async (req, res) => {
     };
     let verifiedContext: PageAuthContext | null = null;
 
-    pageVerifier(requestLike, responseLike(res), () => {
+    pageVerifier(requestLike, response, () => {
       verifiedContext = requestLike.konsier ?? null;
     });
 
@@ -133,6 +225,7 @@ const server = createServer(async (req, res) => {
   sendHtml(res, 404, renderNotFoundPage());
 });
 
-server.listen(port, () => {
+server.listen(port, async () => {
+  await sdk.sync();
   console.log(`[restaurant-example] listening on http://localhost:${port}`);
 });

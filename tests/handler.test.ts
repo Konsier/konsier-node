@@ -47,7 +47,7 @@ function createSignedRequest(apiKey: string, body: Record<string, unknown>) {
   };
 }
 
-describe("handler", () => {
+describe("webhookHandler", () => {
   const apiKey = "k_test_123";
 
   const getMenu = Konsier.tool({
@@ -72,6 +72,7 @@ describe("handler", () => {
 
   const sdk = new Konsier({
     apiKey,
+    endpointUrl: "https://example.com/konsier",
     agents: {
       customer: {
         name: "Customer Support",
@@ -85,6 +86,7 @@ describe("handler", () => {
       pages: [{ name: "Orders", path: "/pages/orders" }],
     },
   });
+  const handler = sdk.webhookHandler();
 
   it("handles agent tool_call requests", async () => {
     const body = {
@@ -124,7 +126,7 @@ describe("handler", () => {
     const req = createSignedRequest(apiKey, body);
     const { res, state } = createMockResponse();
 
-    await sdk.handler()(req, res);
+    await handler(req as never, res as never);
 
     expect(state.statusCode).toBe(200);
     expect(state.body).toEqual({
@@ -161,7 +163,7 @@ describe("handler", () => {
     const req = createSignedRequest(apiKey, body);
     const { res, state } = createMockResponse();
 
-    await sdk.handler()(req, res);
+    await handler(req as never, res as never);
 
     expect(state.statusCode).toBe(200);
     expect(state.body).toEqual({
@@ -184,7 +186,7 @@ describe("handler", () => {
     const req = createSignedRequest(apiKey, body);
     const { res, state } = createMockResponse();
 
-    await sdk.handler()(req, res);
+    await handler(req as never, res as never);
 
     expect(state.statusCode).toBe(200);
     expect(state.body).toMatchObject({
@@ -210,6 +212,7 @@ describe("handler", () => {
   it("returns a coded error when tool output is not an object", async () => {
     const badSdk = new Konsier({
       apiKey,
+      endpointUrl: "https://example.com/konsier",
       agents: {
         customer: {
           systemPrompt: "Support",
@@ -224,6 +227,7 @@ describe("handler", () => {
         },
       },
     });
+    const badHandler = badSdk.webhookHandler();
 
     const body = {
       type: "tool_call",
@@ -251,7 +255,7 @@ describe("handler", () => {
     const req = createSignedRequest(apiKey, body);
     const { res, state } = createMockResponse();
 
-    await badSdk.handler()(req, res);
+    await badHandler(req as never, res as never);
 
     expect(state.statusCode).toBe(500);
     expect(state.body).toEqual({
@@ -278,7 +282,7 @@ describe("handler", () => {
     };
 
     const { res, state } = createMockResponse();
-    await sdk.handler()(req, res);
+    await handler(req as never, res as never);
 
     expect(state.statusCode).toBe(401);
     expect(state.body).toEqual({ error: "SIGNATURE_MISMATCH" });

@@ -37,6 +37,6 @@ These examples live in the repository only. They are not shipped in the publishe
 1. Open the example folder you want to run.
 2. Install dependencies and create `.env` from `.env.example`.
 3. Start the local server.
-4. In Konsier, point a project implementation endpoint at the example's `/konsier` route.
+4. In Konsier, point a project implementation endpoint at the example's configured `endpointUrl`.
 5. Link the relevant agent ref(s).
 6. Configure any channel you want in Konsier. Telegram is usually the fastest path for manual testing.

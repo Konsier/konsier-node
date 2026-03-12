@@ -29,18 +29,35 @@ export class CloudApiClient {
     this.debug = Boolean(options.debug);
   }
 
+  async get(path: string): Promise<Record<string, unknown>> {
+    return this.request("GET", path);
+  }
+
   async post(
     path: string,
     body: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
+    return this.request("POST", path, body);
+  }
+
+  private async request(
+    method: "GET" | "POST",
+    path: string,
+    body?: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
     const url = `${this.baseUrl}${path.startsWith("/") ? path : `/${path}`}`;
-    const payload = JSON.stringify(stripUndefined(body));
+    const normalizedBody = typeof body === "undefined" ? undefined : stripUndefined(body);
+    const payload =
+      typeof normalizedBody === "undefined"
+        ? undefined
+        : JSON.stringify(normalizedBody);
 
     if (shouldDebugLog(this.debug)) {
       console.log("[konsier] cloud request", {
         url,
+        method,
         path,
-        body: stripUndefined(body),
+        body: normalizedBody,
       });
     }
 
@@ -50,15 +67,19 @@ export class CloudApiClient {
       const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
 
       try {
-        const response = await fetch(url, {
-          method: "POST",
+        const requestInit: RequestInit = {
+          method,
           headers: {
             [HEADER_AUTHORIZATION]: `Bearer ${this.apiKey}`,
-            [HEADER_CONTENT_TYPE]: "application/json",
+            ...(payload ? { [HEADER_CONTENT_TYPE]: "application/json" } : {}),
           },
-          body: payload,
           signal: controller.signal,
-        });
+        };
+        if (payload) {
+          requestInit.body = payload;
+        }
+
+        const response = await fetch(url, requestInit);
 
         const raw = await response.text();
         const parsed = parseJsonObject(raw);

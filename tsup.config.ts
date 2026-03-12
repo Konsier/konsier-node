@@ -1,7 +1,13 @@
 import { defineConfig } from "tsup";
 
 export default defineConfig({
-  entry: ["src/index.ts"],
+  entry: {
+    index: "src/index.ts",
+    "adapters/express": "src/adapters/express.ts",
+    "adapters/next": "src/adapters/next.ts",
+    "adapters/fastify": "src/adapters/fastify.ts",
+    "adapters/hono": "src/adapters/hono.ts",
+  },
   format: ["esm", "cjs"],
   dts: true,
   sourcemap: true,

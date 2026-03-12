@@ -380,8 +380,13 @@ const listDailySalesSnapshotTool = Konsier.tool({
   },
 });
 
+const endpointUrl =
+  process.env.KONSIER_ENDPOINT_URL ??
+  `http://localhost:${process.env.PORT ?? "3004"}/konsier`;
+
 export const sdk = new Konsier({
   apiKey: process.env.KONSIER_API_KEY ?? "",
+  endpointUrl,
   agents: {
     restaurant_customer: restaurantCustomer,
     restaurant_worker: restaurantWorker,

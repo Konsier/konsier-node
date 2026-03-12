@@ -1,80 +1,505 @@
-# konsier-node
+# Konsier
 
-Node.js/TypeScript SDK for Konsier. The published package name is `konsier`.
+The Node.js/TypeScript SDK for [Konsier](https://konsier.com) — the platform that connects your AI agents to Telegram, Slack, WhatsApp, Discord, Email, and SMS with a single integration.
+
+Define your agents and tools in code. Konsier handles the channels, conversations, and infrastructure.
+
+```
+Your backend (tools, logic, data)
+        ↕  Konsier SDK
+Konsier Cloud
+        ↕
+Telegram · Slack · WhatsApp · Discord · Email · SMS
+```
+
+## Prerequisites
+
+- **Node.js 20+**
+- A **Konsier account** and project API key from the [dashboard](https://konsier.com)
+- A **publicly reachable endpoint** — Konsier Cloud sends requests to your server, so `localhost` alone won't work. Use a tunnel (ngrok, Cloudflare Tunnel, etc.) during development or deploy to a hosting provider.
 
 ## Install
 
 ```bash
-npm install konsier zod@^4
+npm install konsier
 ```
 
-`konsier` requires Zod 4 when you pass Zod schemas as tool inputs.
+Install your framework separately when needed, for example `express`.
 
-## Basic usage
+The SDK includes [Zod 4](https://zod.dev) as a dependency. Import it from `"zod"` in your tool definitions:
+
+```ts
+import { z } from "zod";
+```
+
+## Quick start
 
 ```ts
 import express from "express";
 import { Konsier } from "konsier";
+import { serveKonsier } from "konsier/express";
 import { z } from "zod";
 
+// 1. Define tools
 const getMenu = Konsier.tool({
   name: "get_menu",
-  description: "Returns current menu items",
-  input: z.object({ category: z.string().optional() }),
+  description: "Returns the restaurant menu",
+  input: z.object({
+    category: z.string().optional(),
+  }),
   handler: async (input, ctx) => {
-    return { items: [], category: input.category ?? null, account: ctx.account?.id ?? null };
+    const items = await fetchMenuItems(input.category);
+    return { items };
+  },
+});
+
+// 2. Configure the SDK
+const konsier = new Konsier({
+  apiKey: process.env.KONSIER_API_KEY!,
+  endpointUrl: "https://your-public-url.com/konsier",
+  agents: {
+    customer_support: {
+      name: "Customer Support",
+      description: "Helps customers with menu questions and orders.",
+      systemPrompt: "You help customers browse the menu and place food orders.",
+      tools: [getMenu],
+    },
+  },
+});
+
+// 3. Serve and sync
+const app = express();
+
+serveKonsier(app, konsier);
+
+app.listen(3000, async () => {
+  await konsier.sync();
+  console.log("Ready on :3000");
+});
+```
+
+`serveKonsier()` derives the webhook path from `endpointUrl` and wires the signed webhook route for you. `sync()` pushes the current local configuration for that `Konsier` instance to Konsier Cloud.
+
+Then in the [Konsier dashboard](https://konsier.com):
+1. Create a project and grab your API key
+2. Set the endpoint URL to your server's public `/konsier` path
+3. Link the `customer_support` agent
+4. Connect a channel (Telegram, Slack, etc.)
+5. Send a message — your tools execute automatically
+
+## Concepts
+
+| Concept | What it is |
+|---------|-----------|
+| **Agent** | An AI persona with a system prompt and a set of tools. You register agents by ref (e.g. `customer_support`) and Konsier routes conversations to them. |
+| **Tool** | A function your agent can call. Defined with a Zod schema for input validation and a handler that returns a JSON object. |
+| **Channel** | A messaging platform (Telegram, Slack, WhatsApp, Discord, Email, SMS) connected through the Konsier dashboard. |
+| **Internal tool** | A tool available only to project owners in the Konsier dashboard — not exposed to end users. |
+| **Internal page** | A protected page served by your backend, accessible from the Konsier dashboard with verified auth context. |
+| **Account** | A connected business/customer account. Agents and tools receive account context for multi-tenant logic. |
+
+## Defining tools
+
+Use `Konsier.tool()` with a Zod schema for validated, fully-typed tool inputs:
+
+```ts
+import { Konsier } from "konsier";
+import { z } from "zod";
+
+const createOrder = Konsier.tool({
+  name: "create_order",
+  description: "Places a new order",
+  input: z.object({
+    items: z.array(z.object({
+      productId: z.string(),
+      quantity: z.number().int().min(1),
+    })),
+    note: z.string().optional(),
+  }),
+  handler: async (input, ctx) => {
+    const order = await db.orders.create({
+      accountId: ctx.account?.id,
+      userId: ctx.user.id,
+      items: input.items,
+      note: input.note,
+    });
+
+    return { orderId: order.id, status: order.status };
+  },
+});
+```
+
+Tool handlers must return a JSON-serializable object. The Zod schema is automatically converted to JSON Schema for the LLM.
+
+### Tool context
+
+The second argument to every handler is a `ToolContext` with runtime information:
+
+```ts
+handler: async (input, ctx) => {
+  ctx.user        // { id, externalId?, metadata?, displayName? }
+  ctx.account     // { id, name, metadata } or null
+  ctx.channel     // "telegram" | "slack" | "whatsapp" | ...
+  ctx.conversation // { id, startedAt, messageCount }
+  ctx.message     // { text?, html?, attachments? } — the triggering message
+  ctx.send(msg)   // send a follow-up message to the conversation
+}
+```
+
+`ctx.user` always has an `id`. The remaining fields (`externalId`, `metadata`, `displayName`) are populated when available — for example, after you link a user (see [User and account linking](#user-and-account-linking)).
+
+## Configuring agents
+
+Agents are registered as a map of ref strings to config objects:
+
+```ts
+const konsier = new Konsier({
+  apiKey: process.env.KONSIER_API_KEY!,
+  agents: {
+    // Static configuration
+    customer_support: {
+      name: "Customer Support",
+      description: "Handles customer inquiries.",
+      systemPrompt: "You are a helpful customer support agent.",
+      tools: [getMenu, createOrder, trackOrder],
+    },
+
+    // Dynamic configuration — resolved per-request
+    store_manager: async (ctx) => {
+      const storeTools = await loadToolsForAccount(ctx.account?.id);
+      return {
+        systemPrompt: `You manage store ${ctx.account?.name ?? "unknown"}.`,
+        tools: storeTools,
+      };
+    },
+  },
+});
+```
+
+Dynamic agent resolvers receive an `AgentContext` with `account` info, letting you customize the system prompt and tool set per connected account.
+
+## Internal tools and pages
+
+Internal tools are available only in the Konsier dashboard (not to end users via channels). Internal pages are protected routes on your server that render inside the dashboard.
+
+```ts
+const salesSnapshot = Konsier.tool({
+  name: "sales_snapshot",
+  description: "Returns today's sales summary",
+  input: z.object({}),
+  handler: async (_input, ctx) => {
+    const sales = await db.sales.today(ctx.account?.id);
+    return { revenue: sales.revenue, orderCount: sales.count };
   },
 });
 
 const konsier = new Konsier({
   apiKey: process.env.KONSIER_API_KEY!,
-  agents: {
-    customer: {
-      name: "Customer Support",
-      description: "Handles menu questions and food ordering help.",
-      systemPrompt: "You help customers place food orders.",
-      tools: [getMenu],
-    },
-  },
+  agents: { /* ... */ },
   internal: {
-    pages: [{ name: "Orders", path: "/pages/orders" }],
+    tools: [salesSnapshot],
+    pages: [
+      { name: "Dashboard", path: "/pages/dashboard" },
+      { name: "Orders", path: "/pages/orders" },
+    ],
   },
+});
+```
+
+Internal config can also be dynamic — resolved per-request with account context:
+
+```ts
+internal: async (ctx) => ({
+  tools: ctx.account ? [salesSnapshot] : [],
+  pages: [{ name: "Dashboard", path: "/pages/dashboard" }],
+}),
+```
+
+### Serving pages
+
+Use the framework adapter to authenticate protected internal pages:
+
+```ts
+import { verifyKonsierPage } from "konsier/express";
+
+app.get("/pages/*", verifyKonsierPage(konsier), (req, res) => {
+  const { user, account, projectId } = req.konsier!;
+  res.send(renderDashboard({ user, account }));
+});
+```
+
+## User and account linking
+
+Link your own user/account identifiers to Konsier's, so tool handlers can look up your internal records:
+
+```ts
+// Link a Konsier user to your system
+const linkedUser = await konsier.users.link({
+  userId: "konsier_user_id",
+  externalId: "your_internal_user_id",
+  metadata: { plan: "pro" },
+});
+
+// Retrieve a linked user
+const fetchedUser = await konsier.users.get({ userId: "konsier_user_id" });
+
+// Link an account
+const linkedAccount = await konsier.accounts.link({
+  accountId: "konsier_account_id",
+  externalId: "your_internal_account_id",
+  metadata: { region: "us-east" },
+});
+
+// Retrieve accounts
+const fetchedAccount = await konsier.accounts.get({ accountId: "konsier_account_id" });
+const allAccounts = await konsier.accounts.list();
+```
+
+## Connections
+
+Start an OAuth-style connection flow to onboard accounts:
+
+```ts
+// Generate a connection URL and redirect the user to it
+const { url, expiresAt } = await konsier.connections.start({
+  redirect: "https://yourapp.com/connected",
+  metadata: { source: "onboarding" },
+});
+// Redirect user to `url`
+
+// On your redirect handler, complete the connection using the
+// token from the query string (?token=...)
+app.get("/connected", async (req, res) => {
+  const { account } = await konsier.connections.complete({
+    token: req.query.token as string,
+  });
+  res.send(`Connected account: ${account.name}`);
+});
+```
+
+## Sending messages
+
+Push messages to users or conversations from your backend (outside of tool handlers):
+
+```ts
+await konsier.sendMessage({
+  userId: "konsier_user_id",
+  text: "Your order has shipped!",
+});
+
+await konsier.sendMessage({
+  conversationId: "conv_123",
+  html: "<b>Update:</b> Your table is ready.",
+  attachments: [{ type: "image", url: "https://..." }],
+});
+```
+
+Inside tool handlers, use `ctx.send()` for the same purpose:
+
+```ts
+handler: async (input, ctx) => {
+  await ctx.send({ text: "Processing your order..." });
+  const order = await processOrder(input);
+  return { orderId: order.id };
+},
+```
+
+## Express integration
+
+Use the Express adapter to register the webhook route derived from `endpointUrl`:
+
+```ts
+import express from "express";
+import { Konsier } from "konsier";
+import { serveKonsier, verifyKonsierPage } from "konsier/express";
+
+const konsier = new Konsier({
+  apiKey: process.env.KONSIER_API_KEY!,
+  endpointUrl: "https://yourapp.com/konsier",
+  agents: { /* ... */ },
 });
 
 const app = express();
-app.use(express.json({ verify: (req, _res, buf) => {
-  req.rawBody = buf;
-} }));
+serveKonsier(app, konsier);
 
-app.use("/konsier", konsier.handler());
-app.get("/pages/*", konsier.verifyPage(), (req, res) => {
-  res.json({ ok: true, context: req.konsier });
+app.get("/pages/*", verifyKonsierPage(konsier), (req, res) => {
+  res.json({ context: req.konsier });
 });
 
-app.listen(3000);
+app.listen(3000, async () => {
+  await konsier.sync();
+});
 ```
 
-## Example projects
+## Next.js integration
 
-This repository now includes runnable sample apps under
-[`examples/`](./examples):
+Use the Next adapter with App Router route handlers:
 
-- `todo`: Express + TypeScript, one public agent, one protected internal page
-- `marketplace`: custom Express server + Next.js storefront, owner tools and pages kept internal
-- `restaurant-manager`: native Node `http` multi-tenant platform sample for connected restaurant projects
+```ts
+import { Konsier } from "konsier";
+import { createKonsierRoute } from "konsier/next";
 
-These examples are **repo-only**. They are not published with the npm package.
+const konsier = new Konsier({
+  apiKey: process.env.KONSIER_API_KEY!,
+  endpointUrl: "https://yourapp.com/api/konsier",
+  agents: { /* ... */ },
+});
 
-Each example is designed so a developer can:
+export const POST = createKonsierRoute(konsier);
+```
 
-1. run the app locally,
-2. point a Konsier project at the local `/konsier` endpoint,
-3. link the documented agent ref(s),
-4. configure a channel in Konsier, and
-5. verify the corresponding UI and internal pages.
+For protected page requests:
 
-Tool handlers must return JSON objects.
+```ts
+import { verifyKonsierPageRequest } from "konsier/next";
 
-## Local cloud override
+export async function GET(request: Request) {
+  const context = verifyKonsierPageRequest(konsier, request);
+  return Response.json({ context });
+}
+```
 
-The SDK defaults its cloud API base URL to `https://konsier.com/api`.
+## Fastify integration
+
+Register the webhook route directly on a Fastify instance:
+
+```ts
+import Fastify from "fastify";
+import { Konsier } from "konsier";
+import { registerKonsier } from "konsier/fastify";
+
+const app = Fastify();
+const konsier = new Konsier({
+  apiKey: process.env.KONSIER_API_KEY!,
+  endpointUrl: "https://yourapp.com/konsier",
+  agents: { /* ... */ },
+});
+
+registerKonsier(app, konsier);
+await app.listen({ port: 3000 });
+await konsier.sync();
+```
+
+## Hono integration
+
+Use the Hono adapter for fetch-style runtimes:
+
+```ts
+import { Hono } from "hono";
+import { Konsier } from "konsier";
+import { serveKonsier } from "konsier/hono";
+
+const app = new Hono();
+const konsier = new Konsier({
+  apiKey: process.env.KONSIER_API_KEY!,
+  endpointUrl: "https://yourapp.com/konsier",
+  agents: { /* ... */ },
+});
+
+serveKonsier(app, konsier);
+```
+
+## Custom server integration
+
+For plain Node `http`, use `webhookHandler()` directly:
+
+```ts
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { Konsier } from "konsier";
+
+const konsier = new Konsier({ /* config */ });
+const handler = konsier.webhookHandler();
+
+createServer(async (req, res) => {
+  if (req.method === "POST" && req.url === konsier.webhookPath()) {
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    }
+
+    const rawBody = Buffer.concat(chunks);
+    const request = req as IncomingMessage & { body?: string; rawBody?: Buffer };
+    request.rawBody = rawBody;
+    request.body = rawBody.toString("utf8");
+
+    await handler(request, res as ServerResponse & {
+      status?: (statusCode: number) => ServerResponse;
+      json?: (body: unknown) => void;
+      send?: (body: unknown) => void;
+    } as never);
+    return;
+  }
+
+  res.writeHead(404).end();
+}).listen(3000);
+```
+
+## Configuration reference
+
+### `KonsierOptions`
+
+| Option | Type | Required | Description |
+|--------|------|----------|-------------|
+| `apiKey` | `string` | Yes | Your project API key from the Konsier dashboard. |
+| `agents` | `Record<string, AgentEntry>` | No* | Map of agent refs to static configs or async resolver functions. |
+| `internal` | `InternalEntry` | No* | Internal tools and pages — static object or async resolver. |
+| `endpointUrl` | `string` | No | Your server's public Konsier webhook URL. Used by framework adapters and `sync()`. |
+| `debug` | `boolean` | No | Enable debug logging (only logs when `NODE_ENV=development`). |
+
+\* At least one of `agents` or `internal` is required.
+
+### `AgentConfig`
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | `string` | No | Display name for the agent. |
+| `description` | `string` | No | What the agent does. |
+| `systemPrompt` | `string` | Yes | The system prompt sent to the LLM. |
+| `tools` | `Tool[]` | Yes | Array of tools the agent can call. |
+| `events` | `AgentEvents` | No | *Coming soon.* Lifecycle hooks: `onConversationStart`, `onConversationEnd`. |
+
+### `Konsier.tool()` options
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | `string` | Yes | Alphanumeric, underscores, and hyphens only. |
+| `description` | `string` | Yes | What the tool does (shown to the LLM). |
+| `input` | `ZodSchema` | Yes | Zod schema defining the tool's input. |
+| `handler` | `(input, ctx) => object` | Yes | Async or sync function returning a JSON object. |
+
+### `ToolContext`
+
+Passed as the second argument to every tool handler:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `user` | `EndUser` | Always has `id`. Optional: `externalId`, `metadata`, `displayName`. |
+| `account` | `Account \| null` | `{ id, name, metadata }` — null if no account is linked. |
+| `channel` | `Channel` | `"telegram" \| "slack" \| "discord" \| "whatsapp" \| "email" \| "sms" \| "konsier"` |
+| `agent` | `string` | The agent ref handling this call (or `"internal"`). |
+| `conversation` | `Conversation` | `{ id, startedAt, messageCount }` |
+| `message` | `ToolMessage` | `{ text?, html?, attachments? }` — the user's triggering message. |
+| `send` | `(msg) => Promise<void>` | Send a follow-up message to the conversation. |
+
+### Environment variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `KONSIER_API_KEY` | — | API key (can also be passed in constructor). |
+| `KONSIER_API_BASE_URL` | `https://konsier.com/api` | Override the cloud API URL (for development). |
+
+## Examples
+
+The [`examples/`](./examples) directory contains runnable sample apps (not published to npm):
+
+| Example | Stack | What it demonstrates |
+|---------|-------|---------------------|
+| [`todo`](./examples/todo) | Express | Single agent, CRUD tools, one internal page |
+| [`marketplace`](./examples/marketplace) | Express + Next.js | Public + internal tools, catalog and order pages |
+| [`restaurant-manager`](./examples/restaurant-manager) | Node `http` + direct webhook handler | Multi-agent, multi-tenant, dynamic resolvers |
+
+Each example follows the same steps: install, add your API key, start the server, connect it in the Konsier dashboard.
+
+## License
+
+Apache 2.0 — see [LICENSE](./LICENSE) for details.

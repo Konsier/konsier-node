@@ -1,6 +1,7 @@
 import "dotenv/config";
 import express from "express";
 import { resolve } from "node:path";
+import { serveKonsier } from "konsier/express";
 
 import { konsier, pageVerifier } from "./konsier";
 import { addTask, deleteTask, taskStats, toggleTask } from "./state";
@@ -60,7 +61,9 @@ app.get("/pages/tasks", pageVerifier, (req, res) => {
   );
 });
 
-app.listen(port, () => {
-  konsier.mount(app);
+serveKonsier(app, konsier);
+
+app.listen(port, async () => {
+  await konsier.sync();
   console.log(`[todo-example] listening on http://localhost:${port}`);
 });

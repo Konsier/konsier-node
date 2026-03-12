@@ -8,7 +8,10 @@ import {
 } from "../state";
 import { renderTemplate } from "./template";
 
-export function renderHomePage(): string {
+export function renderHomePage(input?: {
+  connectUrl?: string | null;
+  connectStatus?: string | null;
+}): string {
   const tenants = listTenants()
     .map((tenant) =>
       renderTemplate("partials/home-tenant-card.html", {
@@ -25,6 +28,7 @@ export function renderHomePage(): string {
     title: "Dashboard",
     subtitle: "Overview of all connected restaurants and their current status.",
     body: renderTemplate("pages/home-body.html", {
+      connectPanel: renderConnectPanel(input),
       tenants,
     }),
   });
@@ -165,6 +169,35 @@ function renderShell(input: {
     subtitle: escapeHtml(input.subtitle),
     body: input.body,
   });
+}
+
+function renderConnectPanel(input?: {
+  connectUrl?: string | null;
+  connectStatus?: string | null;
+}): string {
+  const status = escapeHtml(input?.connectStatus ?? "");
+  const connectUrl = input?.connectUrl?.trim() ?? "";
+  const cta = connectUrl
+    ? `<div class="actions"><a href="${escapeHtml(connectUrl)}" class="btn btn-primary">Connect Restaurant Project</a></div>`
+    : "";
+  const helper = connectUrl
+    ? "Share this button with another Konsier project owner to connect their restaurant."
+    : "Connect a Konsier project to this platform to start generating tenant-aware restaurant state.";
+  const statusMarkup = status
+    ? `<div class="meta-row"><span class="meta-tag">${status}</span></div>`
+    : "";
+
+  return `
+    <section class="card" style="margin-bottom: 16px;">
+      <div class="card-label">Accounts</div>
+      <h2>Connect a restaurant</h2>
+      <p style="color: var(--secondary); font-size: 0.938rem; line-height: 1.6; margin-top: 8px;">
+        ${escapeHtml(helper)}
+      </p>
+      ${statusMarkup}
+      ${cta}
+    </section>
+  `;
 }
 
 function money(value: number): string {

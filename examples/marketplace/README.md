@@ -4,7 +4,7 @@ Public storefront in Next.js, owner operations in Konsier internal pages.
 
 ## What it shows
 
-- Custom Express server hosting a Next.js app
+- Express adapter hosting a Next.js app
 - One public agent ref: `shopping_assistant`
 - Two protected internal pages:
   - `/pages/catalog`
