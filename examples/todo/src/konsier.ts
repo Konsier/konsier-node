@@ -16,7 +16,7 @@ const listTasksTool = Konsier.tool({
       input.showCompleted ? true : !task.done,
     );
 
-    console.log("List tasks", input);
+    console.log("List tasks", input, ctx);
 
     return {
       tasks,
@@ -33,10 +33,12 @@ const addTaskTool = Konsier.tool({
     title: z.string().min(1),
     priority: z.enum(["low", "medium", "high"]).optional(),
   }),
-  handler: async (input) => {
+  handler: async (input, ctx) => {
     const task = input.priority
       ? addTask({ title: input.title, priority: input.priority })
       : addTask({ title: input.title });
+
+    console.log("Add task", input, ctx);
 
     return { task };
   },
@@ -75,8 +77,8 @@ export const konsier = new Konsier({
   endpointUrl,
   debug: true,
   agents: {
-    task_assistant: {
-      name: "Task Assistant",
+    todo_assistant: {
+      name: "Todo Assistant",
       description: "Tracks a compact todo list for demos.",
       systemPrompt:
         "You manage a lightweight task board. Use tools to read or modify tasks before responding.",
@@ -87,4 +89,5 @@ export const konsier = new Konsier({
     pages: [{ name: "Tasks", path: "/pages/tasks" }],
   },
 });
+
 export const pageAuth = verifyKonsierPage(konsier);

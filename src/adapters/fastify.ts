@@ -1,8 +1,8 @@
 import type {
   HeadersLike,
   HttpResponseLike,
-  PageAuthRequestInput,
-  PageAuthResult,
+  PageRequestInput,
+  PageRequestResult,
 } from "../types";
 import type { Konsier } from "../client";
 import { verifyPageRequest } from "./shared";
@@ -72,7 +72,7 @@ export function verifyKonsierPageRequest(
   konsier: Konsier,
   request:
     | Request
-    | PageAuthRequestInput
+    | PageRequestInput
     | {
         headers: HeadersLike;
         url?: string;
@@ -82,7 +82,7 @@ export function verifyKonsierPageRequest(
         };
         protocol?: string;
       },
-): PageAuthResult {
+): PageRequestResult {
   if (request instanceof Request) {
     return verifyPageRequest(konsier, request);
   }

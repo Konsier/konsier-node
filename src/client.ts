@@ -36,8 +36,8 @@ import type {
   SdkUser,
   UserGetInput,
   UserLinkInput,
-  PageAuthRequestInput,
-  PageAuthResult,
+  PageRequestInput,
+  PageRequestResult,
 } from "./types";
 
 function shouldDebugLog(debug: boolean): boolean {
@@ -296,7 +296,7 @@ export class Konsier {
     }
   }
 
-  pageRequest(input: PageAuthRequestInput): PageAuthResult {
+  pageRequest(input: PageRequestInput): PageRequestResult {
     return resolvePageRequest(
       {
         apiKey: this.apiKey,

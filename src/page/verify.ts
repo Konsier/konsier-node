@@ -12,9 +12,9 @@ import {
 } from "../protocol/signatures";
 import type {
   Account,
-  PageAuthContext,
-  PageAuthRequestInput,
-  PageAuthResult,
+  PageContext,
+  PageRequestInput,
+  PageRequestResult,
   PageUser,
 } from "../types";
 
@@ -26,8 +26,8 @@ interface PageContextOptions {
 
 export function resolvePageRequest(
   options: PageContextOptions,
-  input: PageAuthRequestInput,
-): PageAuthResult {
+  input: PageRequestInput,
+): PageRequestResult {
   const debug = Boolean(options.debug);
   const pageUrl = parseRequestUrl(input.url);
   if (!pageUrl) {
@@ -109,7 +109,7 @@ export function resolvePageRequest(
     return unauthorizedResponse();
   }
 
-  const context = createPageAuthContext(
+  const context = createPageContext(
     pageUrl.pathname,
     verifiedSession.payload.projectId,
     verifiedSession.payload.account,
@@ -130,7 +130,7 @@ export function resolvePageRequest(
   };
 }
 
-function unauthorizedResponse(): PageAuthResult {
+function unauthorizedResponse(): PageRequestResult {
   return {
     type: "response",
     status: 401,
@@ -142,7 +142,7 @@ function unauthorizedResponse(): PageAuthResult {
   };
 }
 
-function createPageAuthContext(
+function createPageContext(
   pagePath: string,
   projectId: string | null,
   account: {
@@ -156,7 +156,7 @@ function createPageAuthContext(
     email: string | null;
     name: string | null;
   },
-): PageAuthContext {
+): PageContext {
   const contextUser: PageUser = {};
   if (user.id) {
     contextUser.id = user.id;
@@ -204,7 +204,7 @@ function parseRequestUrl(raw: string): URL | null {
 }
 
 function readPageSessionCookie(
-  headers: PageAuthRequestInput["headers"],
+  headers: PageRequestInput["headers"],
 ): string | null {
   const cookieHeader = getHeaderValue(headers, "cookie");
   if (!cookieHeader) {

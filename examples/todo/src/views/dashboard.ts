@@ -1,11 +1,11 @@
-import type { PageAuthContext } from "konsier";
+import type { PageContext } from "konsier";
 
 import { listTasks, taskStats } from "../state";
 import { renderTemplate, renderTemplates } from "./template";
 
 interface DashboardInput {
   heading: string;
-  context?: PageAuthContext | null;
+  context?: PageContext | null;
 }
 
 export function renderDashboard(input: DashboardInput): string {

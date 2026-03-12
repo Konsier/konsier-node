@@ -226,7 +226,7 @@ export interface HttpResponseLike {
 export type NextFunction = (error?: unknown) => void;
 export type PageTheme = "light" | "dark";
 
-export interface PageAuthContext {
+export interface PageContext {
   pagePath: string;
   projectId: string | null;
   account: Account | null;
@@ -234,15 +234,15 @@ export interface PageAuthContext {
   user: PageUser;
 }
 
-export interface PageAuthRequestInput {
+export interface PageRequestInput {
   url: string;
   headers: HeadersLike;
 }
 
-export type PageAuthResult =
+export type PageRequestResult =
   | {
       type: "authorized";
-      context: PageAuthContext;
+      context: PageContext;
     }
   | {
       type: "response";
@@ -266,7 +266,7 @@ declare module "node:http" {
 declare global {
   namespace Express {
     interface Request {
-      konsier?: PageAuthContext;
+      konsier?: PageContext;
     }
   }
 }

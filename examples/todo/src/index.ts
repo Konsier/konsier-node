@@ -50,8 +50,7 @@ app.post("/tasks/:taskId/delete", (req, res) => {
 });
 
 app.get("/pages/tasks", pageAuth, (req, res) => {
-  const context =
-    (req as typeof req & { konsier?: unknown }).konsier ?? null;
+  const context = (req as typeof req & { konsier?: unknown }).konsier ?? null;
 
   res.send(
     renderDashboard({

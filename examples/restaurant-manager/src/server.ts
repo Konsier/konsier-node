@@ -4,7 +4,11 @@ import rawBody from "fastify-raw-body";
 import { registerKonsier, verifyKonsierPageRequest } from "konsier/fastify";
 
 import { sdk } from "./konsier";
-import { getTenantSnapshot, listTenants, registerConnectedTenant } from "./state";
+import {
+  getTenantSnapshot,
+  listTenants,
+  registerConnectedTenant,
+} from "./state";
 import {
   renderHomePage,
   renderOpsPage,
@@ -55,7 +59,10 @@ app.get("/connect", async (request, reply) => {
 
     return reply.redirect(connection.url);
   } catch (error) {
-    console.error("[restaurant-example.connect.start]", formatErrorForLog(error));
+    console.error(
+      "[restaurant-example.connect.start]",
+      formatErrorForLog(error),
+    );
     return reply.redirect("/?connect_status=Connection%20failed");
   }
 });
@@ -164,7 +171,9 @@ function resolveConnectCallbackUrl(request: {
     endpoint.hash = "";
     return endpoint.toString();
   } catch {
-    const forwardedProto = firstHeaderValue(request.headers["x-forwarded-proto"]);
+    const forwardedProto = firstHeaderValue(
+      request.headers["x-forwarded-proto"],
+    );
     const forwardedHost = firstHeaderValue(request.headers["x-forwarded-host"]);
     const protocol = forwardedProto || request.protocol || "http";
     const host = forwardedHost || request.headers.host || `localhost:${port}`;

@@ -240,13 +240,13 @@ When a user opens a protected page from Konsier, the browser flow is:
 2. The SDK validates that token.
 3. The SDK sets a short-lived HTTP-only cookie for your app origin.
 4. The SDK redirects the browser to the clean page URL without the token.
-5. Your handler receives `PageAuthContext`.
+5. Your handler receives `PageContext`.
 
 This is why pages render with their own CSS, JS, and relative navigation intact: they run on your app's real origin, not inside a proxy renderer.
 
-### PageAuthContext
+### PageContext
 
-Protected page handlers receive `PageAuthContext`:
+Protected page handlers receive `PageContext`:
 
 ```ts
 type PageUser = {
@@ -255,7 +255,7 @@ type PageUser = {
   name?: string;
 };
 
-type PageAuthContext = {
+type PageContext = {
   pagePath: string;
   projectId: string | null;
   account: { id: string; name: string; metadata: Record<string, unknown> } | null;
@@ -446,7 +446,7 @@ await app.listen({ port: 3000 });
 await konsier.sync();
 ```
 
-For protected pages, the Fastify helper returns a `PageAuthResult`:
+For protected pages, the Fastify helper returns a `PageRequestResult`:
 
 ```ts
 import { verifyKonsierPageRequest } from "konsier/fastify";
@@ -585,7 +585,7 @@ Passed as the second argument to every tool handler:
 | `message` | `ToolMessage` | `{ text?, html?, attachments? }` — the user's triggering message. |
 | `send` | `(msg) => Promise<void>` | Send a follow-up message to the conversation. |
 
-### `PageAuthContext`
+### `PageContext`
 
 Passed to protected pages after launch bootstrap:
 
@@ -599,7 +599,7 @@ Passed to protected pages after launch bootstrap:
 
 ### `PageUser`
 
-Passed inside `PageAuthContext.user`:
+Passed inside `PageContext.user`:
 
 | Field | Type | Description |
 |-------|------|-------------|

@@ -1,8 +1,8 @@
 import type {
   HeadersLike,
   HttpResponseLike,
-  PageAuthRequestInput,
-  PageAuthResult,
+  PageRequestInput,
+  PageRequestResult,
 } from "../types";
 import type { Konsier } from "../client";
 
@@ -49,8 +49,8 @@ export async function handleFetchWebhook(
 
 export function verifyPageRequest(
   konsier: Konsier,
-  input: Request | PageAuthRequestInput,
-): PageAuthResult {
+  input: Request | PageRequestInput,
+): PageRequestResult {
   if (input instanceof Request) {
     return konsier.pageRequest({
       url: input.url,
@@ -64,7 +64,7 @@ export function verifyPageRequest(
   });
 }
 
-export function pageResultToResponse(result: Extract<PageAuthResult, {
+export function pageResultToResponse(result: Extract<PageRequestResult, {
   type: "response";
 }>): Response {
   return new Response(result.body ?? null, {

@@ -1,4 +1,4 @@
-import type { PageAuthResult } from "../types";
+import type { PageRequestResult } from "../types";
 import type { Konsier } from "../client";
 import {
   handleFetchWebhook,
@@ -15,7 +15,7 @@ export function createKonsierRoute(konsier: Konsier) {
 export function verifyKonsierPageRequest(
   konsier: Konsier,
   request: Request,
-): PageAuthResult | Response {
+): PageRequestResult | Response {
   const result = verifyPageRequest(konsier, request);
   if (result.type === "response") {
     return pageResultToResponse(result);

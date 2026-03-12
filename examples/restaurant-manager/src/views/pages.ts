@@ -1,4 +1,4 @@
-import type { PageAuthContext } from "konsier";
+import type { PageContext } from "konsier";
 
 import {
   getTenantSnapshot,
@@ -104,7 +104,7 @@ export function renderWorkerPage(
 export function renderOpsPage(
   accountId: string,
   accountName: string,
-  context: PageAuthContext,
+  context: PageContext,
 ): string {
   const snapshot = getTenantSnapshot({ accountId, accountName });
   const sales = listDailySalesSnapshot({ accountId, accountName });
