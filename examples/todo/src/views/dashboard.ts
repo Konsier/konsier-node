@@ -16,6 +16,7 @@ export function renderDashboard(input: DashboardInput): string {
         projectId: escapeHtml(input.context.projectId ?? "none"),
         pagePath: escapeHtml(input.context.pagePath),
         accountName: escapeHtml(input.context.account?.name ?? "none"),
+        theme: escapeHtml(input.context.theme),
         userName: escapeHtml(
           input.context.user.name ?? input.context.user.email ?? "unknown",
         ),
@@ -36,6 +37,7 @@ export function renderDashboard(input: DashboardInput): string {
   return renderTemplate("dashboard.html", {
     pageTitle: "Todo Example",
     heading: escapeHtml(input.heading),
+    themeClass: input.context?.theme === "dark" ? "theme-dark" : "theme-light",
     contextCard,
     taskItems,
     totalTasks: String(stats.total),

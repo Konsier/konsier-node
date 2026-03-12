@@ -192,6 +192,9 @@ const toggleAvailabilityTool = Konsier.tool({
 
 export const sdk = new Konsier({
   apiKey: process.env.KONSIER_API_KEY ?? "",
+  endpointUrl:
+    process.env.KONSIER_ENDPOINT_URL ??
+    `http://localhost:${process.env.PORT ?? "3003"}/api/konsier`,
   agents: {
     shopping_assistant: {
       name: "Shopping Assistant",

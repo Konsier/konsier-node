@@ -122,6 +122,12 @@ export interface EndUser {
   guildId?: string;
 }
 
+export interface PageUser {
+  id?: string;
+  email?: string;
+  name?: string;
+}
+
 export interface Conversation {
   id: string;
   startedAt: string;
@@ -218,17 +224,32 @@ export interface HttpResponseLike {
 }
 
 export type NextFunction = (error?: unknown) => void;
+export type PageTheme = "light" | "dark";
 
 export interface PageAuthContext {
   pagePath: string;
   projectId: string | null;
   account: Account | null;
-  user: {
-    id?: string;
-    email?: string;
-    name?: string;
-  };
+  theme: PageTheme;
+  user: PageUser;
 }
+
+export interface PageAuthRequestInput {
+  url: string;
+  headers: HeadersLike;
+}
+
+export type PageAuthResult =
+  | {
+      type: "authorized";
+      context: PageAuthContext;
+    }
+  | {
+      type: "response";
+      status: number;
+      headers: Record<string, string>;
+      body?: string;
+    };
 
 declare module "http" {
   interface IncomingMessage {

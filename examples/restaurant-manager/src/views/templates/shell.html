@@ -25,6 +25,23 @@
         --radius: 10px;
       }
 
+      body.theme-dark {
+        --bg: #0f172a;
+        --surface: #111827;
+        --ink: #f8fafc;
+        --secondary: #cbd5e1;
+        --muted: #94a3b8;
+        --accent: #34d399;
+        --accent-hover: #10b981;
+        --accent-light: rgba(52, 211, 153, 0.16);
+        --border: #334155;
+        --border-hover: #475569;
+        --amber: #fbbf24;
+        --amber-light: rgba(251, 191, 36, 0.14);
+        --red: #f87171;
+        --red-light: rgba(248, 113, 113, 0.14);
+      }
+
       body {
         font-family: -apple-system, "Segoe UI", system-ui, sans-serif;
         background: var(--bg);
@@ -381,7 +398,7 @@
       }
     </style>
   </head>
-  <body>
+  <body class="{{themeClass}}">
     <header class="app-header">
       <a href="/" class="logo">
         <div class="logo-icon">K</div>

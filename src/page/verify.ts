@@ -1,123 +1,244 @@
 import {
-  DEFAULT_ALLOWED_CLOCK_SKEW_MS,
-  HEADER_ACCOUNT_ID,
-  HEADER_ACCOUNT_METADATA,
-  HEADER_ACCOUNT_NAME,
-  HEADER_PAGE_PATH,
-  HEADER_PROJECT_ID,
-  HEADER_SIGNATURE,
-  HEADER_TIMESTAMP,
-  HEADER_USER_EMAIL,
-  HEADER_USER_ID,
-  HEADER_USER_NAME,
+  DEFAULT_PAGE_SESSION_TTL_MS,
+  PAGE_LAUNCH_QUERY_PARAM,
+  PAGE_SESSION_COOKIE_NAME,
 } from "../constants";
 import {
-  createPageContextPayload,
+  createPageSessionToken,
   getHeaderValue,
-  verifyKonsierSignature,
+  verifyPageToken,
+  type PageLaunchTokenPayload,
+  type PageSessionTokenPayload,
 } from "../protocol/signatures";
 import type {
-  HttpRequestLike,
-  HttpResponseLike,
-  NextFunction,
+  Account,
   PageAuthContext,
+  PageAuthRequestInput,
+  PageAuthResult,
+  PageUser,
 } from "../types";
 
-interface VerifyPageOptions {
+interface PageContextOptions {
   apiKey: string;
-  allowedClockSkewMs?: number;
   debug?: boolean;
+  pageSessionTtlMs?: number;
 }
 
-export function createVerifyPageMiddleware(options: VerifyPageOptions) {
-  const allowedClockSkewMs =
-    options.allowedClockSkewMs ?? DEFAULT_ALLOWED_CLOCK_SKEW_MS;
+export function resolvePageRequest(
+  options: PageContextOptions,
+  input: PageAuthRequestInput,
+): PageAuthResult {
   const debug = Boolean(options.debug);
+  const pageUrl = parseRequestUrl(input.url);
+  if (!pageUrl) {
+    debugLog(debug, "page auth failed", { reason: "INVALID_URL" });
+    return unauthorizedResponse();
+  }
 
-  return function verifyPage(
-    req: HttpRequestLike,
-    res: HttpResponseLike,
-    next?: NextFunction,
-  ): void {
-    const signature = getHeaderValue(req.headers, HEADER_SIGNATURE);
-    const timestamp = getHeaderValue(req.headers, HEADER_TIMESTAMP);
-    const pagePath = getHeaderValue(req.headers, HEADER_PAGE_PATH);
-
-    if (!signature || !timestamp || !pagePath) {
-      debugLog(debug, "missing page verification headers");
-      deny(res);
-      return;
-    }
-
-    const accountMetadata = parseJsonObject(
-      getHeaderValue(req.headers, HEADER_ACCOUNT_METADATA),
-    );
-    const user: PageAuthContext["user"] = {};
-    const userId = getHeaderValue(req.headers, HEADER_USER_ID);
-    const userEmail = getHeaderValue(req.headers, HEADER_USER_EMAIL);
-    const userName = getHeaderValue(req.headers, HEADER_USER_NAME);
-    if (userId !== undefined) {
-      user.id = userId;
-    }
-    if (userEmail !== undefined) {
-      user.email = userEmail;
-    }
-    if (userName !== undefined) {
-      user.name = userName;
-    }
-
-    const projectId = getHeaderValue(req.headers, HEADER_PROJECT_ID) ?? null;
-    const account =
-      getHeaderValue(req.headers, HEADER_ACCOUNT_ID) &&
-      getHeaderValue(req.headers, HEADER_ACCOUNT_NAME)
-        ? {
-            id: getHeaderValue(req.headers, HEADER_ACCOUNT_ID) as string,
-            name: getHeaderValue(req.headers, HEADER_ACCOUNT_NAME) as string,
-            metadata: accountMetadata ?? {},
-          }
-        : null;
-
-    const verified = verifyKonsierSignature({
+  const launchToken =
+    pageUrl.searchParams.get(PAGE_LAUNCH_QUERY_PARAM)?.trim() ?? "";
+  if (launchToken) {
+    const verifiedLaunch = verifyPageToken<PageLaunchTokenPayload>({
       apiKey: options.apiKey,
-      timestamp,
-      payload: createPageContextPayload({
-        pagePath,
-        projectId,
-        account,
-        user,
-      }),
-      providedSignature: signature,
-      allowedClockSkewMs,
+      token: launchToken,
     });
-
-    if (!verified.ok) {
-      debugLog(debug, "page verification failed", {
-        pagePath,
-        projectId,
-        reason: verified.reason,
+    if (!verifiedLaunch.ok || verifiedLaunch.payload.type !== "launch") {
+      debugLog(debug, "page launch token rejected", {
+        reason: verifiedLaunch.ok ? "INVALID_LAUNCH_TYPE" : verifiedLaunch.reason,
+        pagePath: pageUrl.pathname,
       });
-      deny(res);
-      return;
+      return unauthorizedResponse();
+    }
+    if (verifiedLaunch.payload.pagePath !== pageUrl.pathname) {
+      debugLog(debug, "page launch token path mismatch", {
+        expectedPath: verifiedLaunch.payload.pagePath,
+        requestPath: pageUrl.pathname,
+      });
+      return unauthorizedResponse();
     }
 
-    const context: PageAuthContext = {
-      pagePath,
-      projectId,
-      account,
-      user,
-    };
-
-    (req as HttpRequestLike & { konsier?: PageAuthContext }).konsier = context;
-    debugLog(debug, "page verified", {
-      pagePath,
-      projectId,
-      accountId: account?.id ?? null,
-      userId: user.id ?? null,
+    const sessionToken = createPageSessionToken({
+      apiKey: options.apiKey,
+      projectId: verifiedLaunch.payload.projectId,
+      account: verifiedLaunch.payload.account,
+      user: verifiedLaunch.payload.user,
+      theme: verifiedLaunch.payload.theme,
+      exp: Date.now() + (options.pageSessionTtlMs ?? DEFAULT_PAGE_SESSION_TTL_MS),
     });
-    if (next) {
-      next();
-    }
+
+    const cleanUrl = new URL(pageUrl.toString());
+    cleanUrl.searchParams.delete(PAGE_LAUNCH_QUERY_PARAM);
+
+    debugLog(debug, "page launch token accepted", {
+      pagePath: pageUrl.pathname,
+      projectId: verifiedLaunch.payload.projectId,
+      accountId: verifiedLaunch.payload.account?.id ?? null,
+      userId: verifiedLaunch.payload.user.id ?? null,
+    });
+
+    return {
+      type: "response",
+      status: 302,
+      headers: {
+        "cache-control": "no-store",
+        location: `${cleanUrl.pathname}${cleanUrl.search}${cleanUrl.hash}`,
+        "set-cookie": serializePageSessionCookie(
+          sessionToken,
+          pageUrl.protocol === "https:",
+          options.pageSessionTtlMs ?? DEFAULT_PAGE_SESSION_TTL_MS,
+        ),
+      },
+    };
+  }
+
+  const sessionToken = readPageSessionCookie(input.headers);
+  if (!sessionToken) {
+    debugLog(debug, "page session cookie missing", { pagePath: pageUrl.pathname });
+    return unauthorizedResponse();
+  }
+
+  const verifiedSession = verifyPageToken<PageSessionTokenPayload>({
+    apiKey: options.apiKey,
+    token: sessionToken,
+  });
+  if (!verifiedSession.ok || verifiedSession.payload.type !== "session") {
+    debugLog(debug, "page session rejected", {
+      reason: verifiedSession.ok ? "INVALID_SESSION_TYPE" : verifiedSession.reason,
+      pagePath: pageUrl.pathname,
+    });
+    return unauthorizedResponse();
+  }
+
+  const context = createPageAuthContext(
+    pageUrl.pathname,
+    verifiedSession.payload.projectId,
+    verifiedSession.payload.account,
+    verifiedSession.payload.theme,
+    verifiedSession.payload.user,
+  );
+
+  debugLog(debug, "page session resolved", {
+    pagePath: context.pagePath,
+    projectId: context.projectId,
+    accountId: context.account?.id ?? null,
+    userId: context.user.id ?? null,
+  });
+
+  return {
+    type: "authorized",
+    context,
   };
+}
+
+function unauthorizedResponse(): PageAuthResult {
+  return {
+    type: "response",
+    status: 401,
+    headers: {
+      "cache-control": "no-store",
+      "content-type": "text/plain; charset=utf-8",
+    },
+    body: "Unauthorized",
+  };
+}
+
+function createPageAuthContext(
+  pagePath: string,
+  projectId: string | null,
+  account: {
+    id: string | null;
+    name: string | null;
+    metadata: Record<string, unknown>;
+  } | null,
+  theme: "light" | "dark",
+  user: {
+    id: string | null;
+    email: string | null;
+    name: string | null;
+  },
+): PageAuthContext {
+  const contextUser: PageUser = {};
+  if (user.id) {
+    contextUser.id = user.id;
+  }
+  if (user.email) {
+    contextUser.email = user.email;
+  }
+  if (user.name) {
+    contextUser.name = user.name;
+  }
+
+  return {
+    pagePath,
+    projectId,
+    account: normalizeAccount(account),
+    theme,
+    user: contextUser,
+  };
+}
+
+function normalizeAccount(
+  account: {
+    id: string | null;
+    name: string | null;
+    metadata: Record<string, unknown>;
+  } | null,
+): Account | null {
+  if (!account?.id || !account.name) {
+    return null;
+  }
+
+  return {
+    id: account.id,
+    name: account.name,
+    metadata: account.metadata ?? {},
+  };
+}
+
+function parseRequestUrl(raw: string): URL | null {
+  try {
+    return new URL(raw);
+  } catch {
+    return null;
+  }
+}
+
+function readPageSessionCookie(
+  headers: PageAuthRequestInput["headers"],
+): string | null {
+  const cookieHeader = getHeaderValue(headers, "cookie");
+  if (!cookieHeader) {
+    return null;
+  }
+
+  const cookies = cookieHeader.split(";");
+  for (const cookie of cookies) {
+    const [rawName, ...rawValue] = cookie.trim().split("=");
+    if (rawName === PAGE_SESSION_COOKIE_NAME) {
+      const value = rawValue.join("=").trim();
+      return value || null;
+    }
+  }
+
+  return null;
+}
+
+function serializePageSessionCookie(
+  value: string,
+  secure: boolean,
+  ttlMs: number,
+): string {
+  const parts = [
+    `${PAGE_SESSION_COOKIE_NAME}=${value}`,
+    "Path=/",
+    "HttpOnly",
+    "SameSite=Lax",
+    `Max-Age=${Math.max(1, Math.floor(ttlMs / 1000))}`,
+  ];
+  if (secure) {
+    parts.push("Secure");
+  }
+  return parts.join("; ");
 }
 
 function debugLog(
@@ -128,45 +249,5 @@ function debugLog(
   if (!debug || process.env.NODE_ENV !== "development") {
     return;
   }
-  console.log("[konsier] verifyPage", meta ? { message, ...meta } : { message });
-}
-
-function deny(res: HttpResponseLike): void {
-  if (typeof res.status === "function") {
-    res.status(401);
-  } else {
-    res.statusCode = 401;
-  }
-
-  if (typeof res.json === "function") {
-    res.json({ error: "Unauthorized" });
-    return;
-  }
-
-  if (typeof res.send === "function") {
-    res.send("Unauthorized");
-    return;
-  }
-
-  if (typeof res.end === "function") {
-    res.end("Unauthorized");
-  }
-}
-
-function parseJsonObject(
-  value: string | undefined,
-): Record<string, unknown> | null {
-  if (!value) {
-    return null;
-  }
-
-  try {
-    const parsed: unknown = JSON.parse(value);
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      return parsed as Record<string, unknown>;
-    }
-    return null;
-  } catch {
-    return null;
-  }
+  console.log("[konsier] pageAuth", meta ? { message, ...meta } : { message });
 }

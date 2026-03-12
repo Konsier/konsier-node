@@ -82,6 +82,22 @@ export function ensureTenant(input: {
   return seedTenant(input.accountId, input.accountName ?? prettifyAccountId(input.accountId));
 }
 
+export function registerConnectedTenant(input: {
+  accountId: string;
+  accountName?: string | null;
+}): TenantState {
+  const existing = tenants.get(input.accountId);
+  const resolvedAccountName =
+    input.accountName?.trim() || prettifyAccountId(input.accountId);
+
+  if (existing) {
+    existing.accountName = resolvedAccountName;
+    return existing;
+  }
+
+  return seedTenant(input.accountId, resolvedAccountName);
+}
+
 export function getTenantSnapshot(input: {
   accountId: string;
   accountName?: string | null;

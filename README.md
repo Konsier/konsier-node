@@ -14,7 +14,7 @@ Telegram · Slack · WhatsApp · Discord · Email · SMS
 
 ## Prerequisites
 
-- **Node.js 20+**
+- **Node.js 20.17+ or 22.9+**
 - A **Konsier account** and project API key from the [dashboard](https://konsier.com)
 - A **publicly reachable endpoint** — Konsier Cloud sends requests to your server, so `localhost` alone won't work. Use a tunnel (ngrok, Cloudflare Tunnel, etc.) during development or deploy to a hosting provider.
 
@@ -95,7 +95,7 @@ Then in the [Konsier dashboard](https://konsier.com):
 | **Tool** | A function your agent can call. Defined with a Zod schema for input validation and a handler that returns a JSON object. |
 | **Channel** | A messaging platform (Telegram, Slack, WhatsApp, Discord, Email, SMS) connected through the Konsier dashboard. |
 | **Internal tool** | A tool available only to project owners in the Konsier dashboard — not exposed to end users. |
-| **Internal page** | A protected page served by your backend, accessible from the Konsier dashboard with verified auth context. |
+| **Internal page** | A protected page served by your backend. Konsier opens it directly on your app origin with a short-lived launch token, and the SDK bootstraps a cookie-backed page session. |
 | **Account** | A connected business/customer account. Agents and tools receive account context for multi-tenant logic. |
 
 ## Defining tools
@@ -180,7 +180,7 @@ Dynamic agent resolvers receive an `AgentContext` with `account` info, letting y
 
 ## Internal tools and pages
 
-Internal tools are available only in the Konsier dashboard (not to end users via channels). Internal pages are protected routes on your server that render inside the dashboard.
+Internal tools are available only in the Konsier dashboard (not to end users via channels). Protected pages are routes on your server that Konsier launches directly on your app origin.
 
 ```ts
 const salesSnapshot = Konsier.tool({
@@ -217,7 +217,9 @@ internal: async (ctx) => ({
 
 ### Serving pages
 
-Use the framework adapter to authenticate protected internal pages:
+Protected pages are opened from Konsier with a short-lived launch token in the URL. The SDK validates that token, sets an HTTP-only cookie, redirects to the clean page URL, and then exposes page context to your handler.
+
+Use the framework adapter to protect those page routes:
 
 ```ts
 import { verifyKonsierPage } from "konsier/express";
@@ -227,6 +229,61 @@ app.get("/pages/*", verifyKonsierPage(konsier), (req, res) => {
   res.send(renderDashboard({ user, account }));
 });
 ```
+
+For Express, the middleware still handles the full bootstrap automatically. The first browser request may redirect before your route handler runs.
+
+### Page lifecycle
+
+When a user opens a protected page from Konsier, the browser flow is:
+
+1. Konsier opens your real page URL on your app origin with a short-lived launch token in the query string.
+2. The SDK validates that token.
+3. The SDK sets a short-lived HTTP-only cookie for your app origin.
+4. The SDK redirects the browser to the clean page URL without the token.
+5. Your handler receives `PageAuthContext`.
+
+This is why pages render with their own CSS, JS, and relative navigation intact: they run on your app's real origin, not inside a proxy renderer.
+
+### PageAuthContext
+
+Protected page handlers receive `PageAuthContext`:
+
+```ts
+type PageUser = {
+  id?: string;
+  email?: string;
+  name?: string;
+};
+
+type PageAuthContext = {
+  pagePath: string;
+  projectId: string | null;
+  account: { id: string; name: string; metadata: Record<string, unknown> } | null;
+  theme: "light" | "dark";
+  user: PageUser;
+};
+```
+
+Field meanings:
+
+- `pagePath`: the current protected page path, for example `/pages/orders`
+- `projectId`: the Konsier project ID when available
+- `account`: connected account context for multi-tenant apps, or `null`
+- `theme`: the current Konsier light/dark theme captured at launch time
+- `user`: the Konsier user opening the page when available
+
+### Using page theme
+
+Pages can render against the current Konsier theme directly from `context.theme`:
+
+```ts
+app.get("/pages/dashboard", verifyKonsierPage(konsier), (req, res) => {
+  const themeClass = req.konsier?.theme === "dark" ? "theme-dark" : "theme-light";
+  res.send(renderDashboard({ themeClass, context: req.konsier! }));
+});
+```
+
+The theme is captured when the page is launched. If the user changes theme later in Konsier, reopening the page picks up the new theme.
 
 ## User and account linking
 
@@ -348,16 +405,25 @@ const konsier = new Konsier({
 export const POST = createKonsierRoute(konsier);
 ```
 
-For protected page requests:
+For protected page requests, handle either a bootstrap `Response` or an authorized result:
 
 ```ts
 import { verifyKonsierPageRequest } from "konsier/next";
 
 export async function GET(request: Request) {
-  const context = verifyKonsierPageRequest(konsier, request);
-  return Response.json({ context });
+  const pageAuth = verifyKonsierPageRequest(konsier, request);
+  if (pageAuth instanceof Response) {
+    return pageAuth;
+  }
+
+  return Response.json(pageAuth.context);
 }
 ```
+
+For Next, `verifyKonsierPageRequest(...)` has two outcomes:
+
+- it returns a `Response` during launch bootstrap/redirect
+- it returns `{ type: "authorized", context }` once the page session is established
 
 ## Fastify integration
 
@@ -380,6 +446,27 @@ await app.listen({ port: 3000 });
 await konsier.sync();
 ```
 
+For protected pages, the Fastify helper returns a `PageAuthResult`:
+
+```ts
+import { verifyKonsierPageRequest } from "konsier/fastify";
+
+app.get("/pages/ops", async (request, reply) => {
+  const pageAuth = verifyKonsierPageRequest(konsier, request);
+  if (pageAuth.type === "response") {
+    for (const [name, value] of Object.entries(pageAuth.headers)) {
+      reply.header(name, value);
+    }
+    reply.code(pageAuth.status);
+    return pageAuth.body ?? null;
+  }
+
+  return renderPage(pageAuth.context);
+});
+```
+
+For Fastify, you forward the returned response metadata yourself when `type === "response"`.
+
 ## Hono integration
 
 Use the Hono adapter for fetch-style runtimes:
@@ -398,6 +485,23 @@ const konsier = new Konsier({
 
 serveKonsier(app, konsier);
 ```
+
+For protected pages, Hono follows the same pattern as Next:
+
+```ts
+import { verifyKonsierPageRequest } from "konsier/hono";
+
+app.get("/pages/orders", async (c) => {
+  const pageAuth = verifyKonsierPageRequest(konsier, c.req.raw);
+  if (pageAuth instanceof Response) {
+    return pageAuth;
+  }
+
+  return c.json(pageAuth.context);
+});
+```
+
+For Hono, just return the bootstrap `Response` as-is when you get one.
 
 ## Custom server integration
 
@@ -481,6 +585,34 @@ Passed as the second argument to every tool handler:
 | `message` | `ToolMessage` | `{ text?, html?, attachments? }` — the user's triggering message. |
 | `send` | `(msg) => Promise<void>` | Send a follow-up message to the conversation. |
 
+### `PageAuthContext`
+
+Passed to protected pages after launch bootstrap:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `pagePath` | `string` | Current protected page path, for example `/pages/orders`. |
+| `projectId` | `string \| null` | Konsier project ID when available. |
+| `account` | `Account \| null` | Connected account context for multi-tenant apps. |
+| `theme` | `"light" \| "dark"` | Konsier theme captured when the page was launched. |
+| `user` | `PageUser` | User who opened the page when available. |
+
+### `PageUser`
+
+Passed inside `PageAuthContext.user`:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | `string \| undefined` | Konsier user ID when available. |
+| `email` | `string \| undefined` | User email when available. |
+| `name` | `string \| undefined` | User display name when available. |
+
+### Page notes
+
+- Protected pages should be opened from Konsier, not bookmarked as first-load clean URLs.
+- Clean page URLs work after the SDK has bootstrapped the page session cookie.
+- The page theme is launch-time state, not a live sync channel.
+
 ### Environment variables
 
 | Variable | Default | Description |
@@ -494,9 +626,9 @@ The [`examples/`](./examples) directory contains runnable sample apps (not publi
 
 | Example | Stack | What it demonstrates |
 |---------|-------|---------------------|
-| [`todo`](./examples/todo) | Express | Single agent, CRUD tools, one internal page |
-| [`marketplace`](./examples/marketplace) | Express + Next.js | Public + internal tools, catalog and order pages |
-| [`restaurant-manager`](./examples/restaurant-manager) | Node `http` + direct webhook handler | Multi-agent, multi-tenant, dynamic resolvers |
+| [`todo`](./examples/todo) | Express | Single agent, CRUD tools, one launchable owner page |
+| [`marketplace`](./examples/marketplace) | Express + Next.js | Public + internal tools, direct-launch catalog and order pages |
+| [`restaurant-manager`](./examples/restaurant-manager) | Fastify | Multi-agent, multi-tenant, dynamic resolvers |
 
 Each example follows the same steps: install, add your API key, start the server, connect it in the Konsier dashboard.
 

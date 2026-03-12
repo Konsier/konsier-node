@@ -1,19 +1,30 @@
-import { KonsierError } from "../errors";
-import type { HeadersLike, HttpResponseLike, PageAuthContext } from "../types";
+import type {
+  HeadersLike,
+  HttpResponseLike,
+  PageAuthRequestInput,
+  PageAuthResult,
+} from "../types";
 import type { Konsier } from "../client";
+
+type ResponseBody = string | Uint8Array | null;
 
 export function headersToObject(
   headers: Headers | HeadersLike,
 ): HeadersLike {
+  const normalized: HeadersLike = {};
+
   if (typeof Headers !== "undefined" && headers instanceof Headers) {
-    const normalized: HeadersLike = {};
     headers.forEach((value, key) => {
       normalized[key] = value;
     });
     return normalized;
   }
 
-  return headers;
+  for (const [key, value] of Object.entries(headers)) {
+    normalized[key] = value;
+  }
+
+  return normalized;
 }
 
 export async function handleFetchWebhook(
@@ -38,40 +49,33 @@ export async function handleFetchWebhook(
 
 export function verifyPageRequest(
   konsier: Konsier,
-  input: Request | Headers | HeadersLike,
-): PageAuthContext {
-  const req: { headers: HeadersLike; konsier?: PageAuthContext } = {
-    headers:
-      input instanceof Request
-        ? headersToObject(input.headers)
-        : headersToObject(input),
-  };
-  const recorder = createResponseRecorder();
-  let context: PageAuthContext | null = null;
-
-  konsier.verifyPage()(req as never, recorder as never, () => {
-    context = req.konsier ?? null;
-  });
-
-  if (context) {
-    return context;
+  input: Request | PageAuthRequestInput,
+): PageAuthResult {
+  if (input instanceof Request) {
+    return konsier.pageRequest({
+      url: input.url,
+      headers: headersToObject(input.headers),
+    });
   }
 
-  const message =
-    typeof recorder.body === "string" && recorder.body
-      ? recorder.body
-      : "Unauthorized";
+  return konsier.pageRequest({
+    url: input.url,
+    headers: headersToObject(input.headers),
+  });
+}
 
-  throw new KonsierError({
-    code: "UNAUTHORIZED",
-    message,
-    statusCode: recorder.statusCode,
+export function pageResultToResponse(result: Extract<PageAuthResult, {
+  type: "response";
+}>): Response {
+  return new Response(result.body ?? null, {
+    status: result.status,
+    headers: result.headers,
   });
 }
 
 function createResponseRecorder(): HttpResponseLike & {
   statusCode: number;
-  body: BodyInit | null;
+  body: ResponseBody;
   headers: Headers;
   toResponse: () => Response;
 } {

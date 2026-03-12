@@ -6,7 +6,9 @@ coverage/
 .env
 .env.*
 *.log
+*.tgz
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
+scripts

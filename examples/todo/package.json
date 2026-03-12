@@ -11,6 +11,7 @@
     "dotenv": "^16.6.1",
     "express": "^5.1.0",
     "konsier": "file:../..",
+    "vitest": "^4.0.18",
     "zod": "^3.24.2"
   },
   "devDependencies": {

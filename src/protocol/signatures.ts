@@ -4,7 +4,38 @@ import {
   DEFAULT_ALLOWED_CLOCK_SKEW_MS,
   SIGNATURE_PREFIX,
 } from "../constants";
-import type { HeadersLike } from "../types";
+import type { HeadersLike, PageTheme } from "../types";
+
+type PageTokenAccount = {
+  id: string | null;
+  name: string | null;
+  metadata: Record<string, unknown>;
+} | null;
+
+type PageTokenUser = {
+  id: string | null;
+  email: string | null;
+  name: string | null;
+};
+
+export interface PageLaunchTokenPayload {
+  type: "launch";
+  pagePath: string;
+  projectId: string | null;
+  account: PageTokenAccount;
+  user: PageTokenUser;
+  theme: PageTheme;
+  exp: number;
+}
+
+export interface PageSessionTokenPayload {
+  type: "session";
+  projectId: string | null;
+  account: PageTokenAccount;
+  user: PageTokenUser;
+  theme: PageTheme;
+  exp: number;
+}
 
 export function getHeaderValue(
   headers: HeadersLike,
@@ -89,7 +120,8 @@ export function verifyKonsierSignature(input: {
   }
 }
 
-export function createPageContextPayload(input: {
+export function createPageLaunchToken(input: {
+  apiKey: string;
   pagePath: string;
   projectId?: string | null;
   account?: {
@@ -102,23 +134,140 @@ export function createPageContextPayload(input: {
     email?: string | null;
     name?: string | null;
   } | null;
+  theme?: PageTheme;
+  exp: number;
 }): string {
-  return JSON.stringify({
+  return createSignedPageToken(input.apiKey, {
+    type: "launch",
     pagePath: input.pagePath,
     projectId: input.projectId ?? null,
-    account: input.account
-      ? {
-          id: input.account.id ?? null,
-          name: input.account.name ?? null,
-          metadata: input.account.metadata ?? {},
-        }
-      : null,
-    user: input.user
-      ? {
-          id: input.user.id ?? null,
-          email: input.user.email ?? null,
-          name: input.user.name ?? null,
-        }
-      : null,
+    account: normalizePageTokenAccount(input.account),
+    user: normalizePageTokenUser(input.user),
+    theme: normalizePageTheme(input.theme),
+    exp: input.exp,
   });
+}
+
+export function createPageSessionToken(input: {
+  apiKey: string;
+  projectId?: string | null;
+  account?: {
+    id?: string | null;
+    name?: string | null;
+    metadata?: Record<string, unknown> | null;
+  } | null;
+  user?: {
+    id?: string | null;
+    email?: string | null;
+    name?: string | null;
+  } | null;
+  theme?: PageTheme;
+  exp: number;
+}): string {
+  return createSignedPageToken(input.apiKey, {
+    type: "session",
+    projectId: input.projectId ?? null,
+    account: normalizePageTokenAccount(input.account),
+    user: normalizePageTokenUser(input.user),
+    theme: normalizePageTheme(input.theme),
+    exp: input.exp,
+  });
+}
+
+export function verifyPageToken<T extends PageLaunchTokenPayload | PageSessionTokenPayload>(
+  input: {
+    apiKey: string;
+    token: string;
+    nowMs?: number;
+  },
+): { ok: true; payload: T } | { ok: false; reason: string } {
+  const dotIndex = input.token.indexOf(".");
+  if (dotIndex <= 0 || dotIndex === input.token.length - 1) {
+    return { ok: false, reason: "INVALID_TOKEN_FORMAT" };
+  }
+
+  const encodedPayload = input.token.slice(0, dotIndex);
+  const providedSignature = input.token.slice(dotIndex + 1);
+  const expectedSignature = createHmac("sha256", input.apiKey)
+    .update(encodedPayload)
+    .digest("hex");
+
+  try {
+    const expectedBuffer = Buffer.from(expectedSignature, "hex");
+    const providedBuffer = Buffer.from(providedSignature, "hex");
+
+    if (expectedBuffer.length !== providedBuffer.length) {
+      return { ok: false, reason: "TOKEN_SIGNATURE_MISMATCH" };
+    }
+
+    if (!timingSafeEqual(expectedBuffer, providedBuffer)) {
+      return { ok: false, reason: "TOKEN_SIGNATURE_MISMATCH" };
+    }
+  } catch {
+    return { ok: false, reason: "TOKEN_SIGNATURE_PARSE_ERROR" };
+  }
+
+  try {
+    const decoded = Buffer.from(encodedPayload, "base64url").toString("utf8");
+    const parsed = JSON.parse(decoded) as T;
+    if (!parsed || typeof parsed !== "object") {
+      return { ok: false, reason: "INVALID_TOKEN_PAYLOAD" };
+    }
+    if (
+      typeof parsed.exp !== "number" ||
+      !Number.isFinite(parsed.exp) ||
+      parsed.exp <= (input.nowMs ?? Date.now())
+    ) {
+      return { ok: false, reason: "TOKEN_EXPIRED" };
+    }
+    return { ok: true, payload: parsed };
+  } catch {
+    return { ok: false, reason: "INVALID_TOKEN_PAYLOAD" };
+  }
+}
+
+function createSignedPageToken(
+  apiKey: string,
+  payload: PageLaunchTokenPayload | PageSessionTokenPayload,
+): string {
+  const encodedPayload = Buffer.from(
+    JSON.stringify(payload),
+    "utf8",
+  ).toString("base64url");
+  const signature = createHmac("sha256", apiKey)
+    .update(encodedPayload)
+    .digest("hex");
+  return `${encodedPayload}.${signature}`;
+}
+
+function normalizePageTokenAccount(input: {
+  id?: string | null;
+  name?: string | null;
+  metadata?: Record<string, unknown> | null;
+} | null | undefined): PageTokenAccount {
+  if (!input) {
+    return null;
+  }
+
+  return {
+    id: input.id ?? null,
+    name: input.name ?? null,
+    metadata: input.metadata ?? {},
+  };
+}
+
+function normalizePageTokenUser(input: {
+  id?: string | null;
+  email?: string | null;
+  name?: string | null;
+} | null | undefined): PageTokenUser {
+  return {
+    id: input?.id ?? null,
+    email: input?.email ?? null,
+    name: input?.name ?? null,
+  };
+}
+
+function normalizePageTheme(input: PageTheme | null | undefined): PageTheme {
+  return input === "dark" ? "dark" : "light";
 }

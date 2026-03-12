@@ -87,4 +87,4 @@ export const konsier = new Konsier({
     pages: [{ name: "Tasks", path: "/pages/tasks" }],
   },
 });
-export const pageVerifier = verifyKonsierPage(konsier);
+export const pageAuth = verifyKonsierPage(konsier);

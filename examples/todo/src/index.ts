@@ -3,7 +3,7 @@ import express from "express";
 import { resolve } from "node:path";
 import { serveKonsier } from "konsier/express";
 
-import { konsier, pageVerifier } from "./konsier";
+import { konsier, pageAuth } from "./konsier";
 import { addTask, deleteTask, taskStats, toggleTask } from "./state";
 import { renderDashboard } from "./views/dashboard";
 
@@ -49,7 +49,7 @@ app.post("/tasks/:taskId/delete", (req, res) => {
   res.redirect("/");
 });
 
-app.get("/pages/tasks", pageVerifier, (req, res) => {
+app.get("/pages/tasks", pageAuth, (req, res) => {
   const context =
     (req as typeof req & { konsier?: unknown }).konsier ?? null;
 

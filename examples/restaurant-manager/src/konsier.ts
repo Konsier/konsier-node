@@ -387,6 +387,7 @@ const endpointUrl =
 export const sdk = new Konsier({
   apiKey: process.env.KONSIER_API_KEY ?? "",
   endpointUrl,
+  debug: process.env.KONSIER_DEBUG === "true",
   agents: {
     restaurant_customer: restaurantCustomer,
     restaurant_worker: restaurantWorker,
@@ -403,8 +404,6 @@ export const sdk = new Konsier({
     pages: [{ name: "Ops", path: "/pages/ops" }],
   },
 });
-
-export const pageVerifier = sdk.verifyPage();
 
 function accountFor(ctx: Pick<ToolContext, "account">): {
   accountId: string;

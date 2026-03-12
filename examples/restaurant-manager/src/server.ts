@@ -1,231 +1,219 @@
 import "dotenv/config";
-import { createServer, type IncomingMessage } from "node:http";
+import Fastify from "fastify";
+import rawBody from "fastify-raw-body";
+import { registerKonsier, verifyKonsierPageRequest } from "konsier/fastify";
 
-import { type PageAuthContext } from "konsier";
-
-import { readBody, responseLike, sendHtml, sendJson } from "./http";
-import { pageVerifier, sdk } from "./konsier";
-import { getTenantSnapshot, listTenants } from "./state";
+import { sdk } from "./konsier";
+import { getTenantSnapshot, listTenants, registerConnectedTenant } from "./state";
 import {
   renderHomePage,
-  renderNotFoundPage,
   renderOpsPage,
   renderTenantPage,
   renderUnauthorizedPage,
   renderWorkerPage,
 } from "./views/pages";
 
-const port = Number(process.env.PORT ?? "3004");
-
-type KonsierRequest = IncomingMessage & {
-  body?: unknown;
-  rawBody?: Buffer;
-  konsier?: PageAuthContext;
+type AccountRouteParams = {
+  accountId: string;
 };
 
-type KonsierMiddleware = (
-  req: KonsierRequest,
-  res: ReturnType<typeof responseLike>,
-  next?: (error?: unknown) => void,
-) => void | Promise<void>;
+type ConnectCallbackQuery = {
+  token?: string;
+};
 
-const webhookHandler = sdk.webhookHandler() as KonsierMiddleware;
+const port = Number(process.env.PORT ?? "3004");
 
-async function runKonsierRoute(
-  req: KonsierRequest,
-  res: ReturnType<typeof responseLike>,
-): Promise<boolean> {
-  const url = new URL(
-    req.url ?? "/",
-    `http://${req.headers.host ?? "localhost"}`,
-  );
+const app = Fastify({
+  logger: false,
+});
 
-  if (req.method !== "POST" || url.pathname !== sdk.webhookPath()) {
-    return false;
-  }
+await app.register(rawBody, {
+  field: "rawBody",
+  global: false,
+  encoding: "utf8",
+  runFirst: true,
+});
 
-  const rawBody = await readBody(req);
-  req.rawBody = Buffer.from(rawBody, "utf8");
-  req.body = rawBody;
+registerKonsier(app, sdk);
 
-  await webhookHandler(req, res);
+app.get("/health", async () => {
+  return { ok: true, tenants: listTenants().length };
+});
 
-  return true;
-}
+app.get("/", async (request, reply) => {
+  const connectStatus = readConnectStatus(request.url);
 
-function appOrigin(req: IncomingMessage): string {
-  const forwardedProto = req.headers["x-forwarded-proto"];
-  const proto =
-    typeof forwardedProto === "string" && forwardedProto.trim()
-      ? forwardedProto.trim().split(",")[0]
-      : "http";
-  return `${proto}://${req.headers.host ?? `localhost:${port}`}`;
-}
+  reply.type("text/html; charset=utf-8");
+  return renderHomePage({ connectStatus });
+});
 
-async function homePageInput(origin: string, status?: string) {
+app.get("/connect", async (request, reply) => {
   try {
-    const result = await sdk.connections.start({
-      redirect: `${origin}/connect/callback`,
-      metadata: {},
+    const connection = await sdk.connections.start({
+      redirect: resolveConnectCallbackUrl(request),
     });
 
-    return {
-      connectUrl: result.url,
-      connectStatus: status ?? null,
-    };
+    return reply.redirect(connection.url);
   } catch (error) {
-    const message =
-      error instanceof Error && error.message
-        ? error.message
-        : "Unable to generate connect link.";
-    return {
-      connectUrl: null,
-      connectStatus: status ?? message,
-    };
+    console.error("[restaurant-example.connect.start]", formatErrorForLog(error));
+    return reply.redirect("/?connect_status=Connection%20failed");
   }
-}
+});
 
-const server = createServer(async (req, res) => {
-  const url = new URL(
-    req.url ?? "/",
-    `http://${req.headers.host ?? "localhost"}`,
-  );
-  const response = responseLike(res);
-  const konsierReq = req as KonsierRequest;
+app.get<{ Querystring: ConnectCallbackQuery }>(
+  "/connect/callback",
+  async (request, reply) => {
+    const token = request.query.token?.trim() ?? "";
 
-  if (await runKonsierRoute(konsierReq, response)) {
-    return;
-  }
-
-  if (req.method === "GET" && url.pathname === "/health") {
-    sendJson(res, 200, { ok: true, tenants: listTenants().length });
-    return;
-  }
-
-  if (req.method === "GET" && url.pathname === "/") {
-    sendHtml(res, 200, renderHomePage(await homePageInput(appOrigin(req))));
-    return;
-  }
-
-  if (req.method === "GET" && url.pathname === "/connect/callback") {
-    const token = (url.searchParams.get("token") ?? "").trim();
     if (!token) {
-      sendHtml(
-        res,
-        400,
-        renderHomePage(
-          await homePageInput(appOrigin(req), "Missing connection token."),
-        ),
-      );
-      return;
+      return reply.redirect("/?connect_status=Missing%20token");
     }
 
     try {
       const result = await sdk.connections.complete({ token });
-      sendHtml(
-        res,
-        200,
-        renderHomePage(
-          await homePageInput(
-            appOrigin(req),
-            `Connected ${result.account.name}.`,
-          ),
-        ),
+      const tenant = registerConnectedTenant({
+        accountId: result.account.id,
+        accountName: result.account.name?.trim() || result.account.externalId,
+      });
+
+      return reply.redirect(
+        `/?connect_status=${encodeURIComponent(`${tenant.accountName} connected`)}`,
       );
     } catch (error) {
-      const code =
-        error && typeof error === "object" && "code" in error
-          ? String((error as { code?: unknown }).code ?? "")
-          : "";
-      const status =
-        code === "CONNECT_CANCELLED"
-          ? "Connection cancelled."
-          : code === "CONNECT_EXPIRED"
-            ? "Connection expired. Start again."
-            : code === "CONNECT_INVALID_TOKEN"
-              ? "Invalid connection token."
-              : error instanceof Error && error.message
-                ? error.message
-                : "Failed to complete connection.";
-      sendHtml(res, 400, renderHomePage(await homePageInput(appOrigin(req), status)));
+      console.error(
+        "[restaurant-example.connect.callback]",
+        formatErrorForLog(error),
+      );
+      return reply.redirect("/?connect_status=Connection%20failed");
     }
-    return;
-  }
+  },
+);
 
-  if (req.method === "GET" && url.pathname.startsWith("/tenants/")) {
-    const accountId = decodeURIComponent(
-      url.pathname.slice("/tenants/".length),
-    );
+app.get<{ Params: AccountRouteParams }>(
+  "/tenants/:accountId",
+  async (request, reply) => {
+    const accountId = decodeURIComponent(request.params.accountId);
     const snapshot = getTenantSnapshot({
       accountId,
       accountName: null,
     });
-    sendHtml(
-      res,
-      200,
-      renderTenantPage(snapshot.accountId, snapshot.accountName),
-    );
-    return;
-  }
 
-  if (req.method === "GET" && url.pathname.startsWith("/workers/")) {
-    const accountId = decodeURIComponent(
-      url.pathname.slice("/workers/".length),
-    );
+    reply.type("text/html; charset=utf-8");
+    return renderTenantPage(snapshot.accountId, snapshot.accountName);
+  },
+);
+
+app.get<{ Params: AccountRouteParams }>(
+  "/workers/:accountId",
+  async (request, reply) => {
+    const accountId = decodeURIComponent(request.params.accountId);
     const snapshot = getTenantSnapshot({
       accountId,
       accountName: null,
     });
-    sendHtml(
-      res,
-      200,
-      renderWorkerPage(snapshot.accountId, snapshot.accountName),
-    );
-    return;
+
+    reply.type("text/html; charset=utf-8");
+    return renderWorkerPage(snapshot.accountId, snapshot.accountName);
+  },
+);
+
+app.get("/pages/ops", async (request, reply) => {
+  const pageAuth = verifyKonsierPageRequest(sdk, request);
+  if (pageAuth.type === "response") {
+    for (const [name, value] of Object.entries(pageAuth.headers)) {
+      reply.header(name, value);
+    }
+    reply.code(pageAuth.status);
+    if (pageAuth.status === 401) {
+      reply.type("text/html; charset=utf-8");
+      return renderUnauthorizedPage();
+    }
+    return pageAuth.body ?? null;
   }
 
-  if (req.method === "GET" && url.pathname === "/pages/ops") {
-    const requestLike: {
-      method?: string;
-      headers: IncomingMessage["headers"];
-      konsier?: PageAuthContext;
-    } = {
-      method: req.method,
-      headers: req.headers,
-    };
-    let verifiedContext: PageAuthContext | null = null;
+  reply.type("text/html; charset=utf-8");
+  return renderOpsPage(
+    pageAuth.context.account?.id ?? "unknown",
+    pageAuth.context.account?.name ?? "Unknown Restaurant",
+    pageAuth.context,
+  );
+});
 
-    pageVerifier(requestLike, response, () => {
-      verifiedContext = requestLike.konsier ?? null;
-    });
+await app.listen({ port, host: "0.0.0.0" });
+await sdk.sync();
 
-    if (res.writableEnded) {
-      return;
-    }
+console.log(`[restaurant-example] listening on http://localhost:${port}`);
 
-    if (!verifiedContext) {
-      sendHtml(res, 401, renderUnauthorizedPage());
-      return;
-    }
+function readConnectStatus(requestUrl: string): string | null {
+  const url = new URL(requestUrl, resolveDefaultBaseUrl());
+  const value = url.searchParams.get("connect_status")?.trim() ?? "";
+  return value || null;
+}
 
-    const pageContext: PageAuthContext = verifiedContext;
+function resolveConnectCallbackUrl(request: {
+  protocol?: string;
+  headers: Record<string, string | string[] | undefined>;
+}): string {
+  const publicEndpointUrl =
+    process.env.KONSIER_ENDPOINT_URL?.trim() || resolveDefaultEndpointUrl();
 
-    sendHtml(
-      res,
-      200,
-      renderOpsPage(
-        pageContext.account?.id ?? "unknown",
-        pageContext.account?.name ?? "Unknown Restaurant",
-        pageContext,
-      ),
-    );
-    return;
+  try {
+    const endpoint = new URL(publicEndpointUrl);
+    endpoint.pathname = "/connect/callback";
+    endpoint.search = "";
+    endpoint.hash = "";
+    return endpoint.toString();
+  } catch {
+    const forwardedProto = firstHeaderValue(request.headers["x-forwarded-proto"]);
+    const forwardedHost = firstHeaderValue(request.headers["x-forwarded-host"]);
+    const protocol = forwardedProto || request.protocol || "http";
+    const host = forwardedHost || request.headers.host || `localhost:${port}`;
+
+    return `${protocol}://${host}/connect/callback`;
+  }
+}
+
+function resolveDefaultBaseUrl(): string {
+  const endpointUrl =
+    process.env.KONSIER_ENDPOINT_URL?.trim() || resolveDefaultEndpointUrl();
+
+  try {
+    return new URL(endpointUrl).origin;
+  } catch {
+    return `http://localhost:${port}`;
+  }
+}
+
+function resolveDefaultEndpointUrl(): string {
+  return `http://localhost:${port}/konsier`;
+}
+
+function firstHeaderValue(
+  value: string | string[] | undefined,
+): string | undefined {
+  if (Array.isArray(value)) {
+    return value[0];
   }
 
-  sendHtml(res, 404, renderNotFoundPage());
-});
+  return value;
+}
 
-server.listen(port, async () => {
-  await sdk.sync();
-  console.log(`[restaurant-example] listening on http://localhost:${port}`);
-});
+function formatErrorForLog(error: unknown): Record<string, unknown> {
+  if (!(error instanceof Error)) {
+    return { error };
+  }
+
+  const record = error as Error & {
+    code?: unknown;
+    statusCode?: unknown;
+    details?: unknown;
+  };
+
+  return {
+    name: record.name,
+    message: record.message,
+    code: record.code ?? null,
+    statusCode: record.statusCode ?? null,
+    details: record.details ?? null,
+  };
+}

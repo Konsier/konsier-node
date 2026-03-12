@@ -9,7 +9,6 @@ import {
 import { renderTemplate } from "./template";
 
 export function renderHomePage(input?: {
-  connectUrl?: string | null;
   connectStatus?: string | null;
 }): string {
   const tenants = listTenants()
@@ -123,9 +122,11 @@ export function renderOpsPage(
   return renderShell({
     title: `${accountName} · Operations`,
     subtitle: "Revenue, open orders, and menu management.",
+    theme: context.theme,
     body: renderTemplate("pages/ops-body.html", {
       accountName: escapeHtml(accountName),
       projectId: escapeHtml(context.projectId ?? "none"),
+      theme: escapeHtml(context.theme),
       userName: escapeHtml(
         context.user.name ?? context.user.email ?? "unknown",
       ),
@@ -163,26 +164,24 @@ function renderShell(input: {
   title: string;
   subtitle: string;
   body: string;
+  theme?: "light" | "dark";
 }): string {
   return renderTemplate("shell.html", {
     title: escapeHtml(input.title),
     subtitle: escapeHtml(input.subtitle),
     body: input.body,
+    themeClass: input.theme === "dark" ? "theme-dark" : "theme-light",
   });
 }
 
 function renderConnectPanel(input?: {
-  connectUrl?: string | null;
   connectStatus?: string | null;
 }): string {
   const status = escapeHtml(input?.connectStatus ?? "");
-  const connectUrl = input?.connectUrl?.trim() ?? "";
-  const cta = connectUrl
-    ? `<div class="actions"><a href="${escapeHtml(connectUrl)}" class="btn btn-primary">Connect Restaurant Project</a></div>`
-    : "";
-  const helper = connectUrl
-    ? "Share this button with another Konsier project owner to connect their restaurant."
-    : "Connect a Konsier project to this platform to start generating tenant-aware restaurant state.";
+  const cta =
+    '<div class="actions"><a href="/connect" class="btn btn-primary">Connect Restaurant Project</a></div>';
+  const helper =
+    "Connect a Konsier project to this platform to start generating tenant-aware restaurant state.";
   const statusMarkup = status
     ? `<div class="meta-row"><span class="meta-tag">${status}</span></div>`
     : "";

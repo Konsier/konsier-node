@@ -3,13 +3,13 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "NODE_ENV=development tsx watch server.ts",
+    "dev": "next dev",
     "build": "next build",
-    "start": "NODE_ENV=production tsx server.ts"
+    "start": "next start",
+    "sync": "tsx scripts/sync.ts"
   },
   "dependencies": {
     "dotenv": "^16.6.1",
-    "express": "^5.1.0",
     "konsier": "file:../..",
     "next": "^15.2.2",
     "react": "^19.0.0",
@@ -17,7 +17,6 @@
     "zod": "^3.24.2"
   },
   "devDependencies": {
-    "@types/express": "^5.0.3",
     "@types/node": "^22.13.10",
     "@types/react": "19.2.14",
     "tsx": "^4.19.3",

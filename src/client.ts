@@ -12,7 +12,7 @@ import { CloudApiClient, resolveCloudBaseUrl } from "./cloud/http";
 import { sendMessage } from "./cloud/send";
 import { KonsierError } from "./errors";
 import { createHandler } from "./handler";
-import { createVerifyPageMiddleware } from "./page/verify";
+import { resolvePageRequest } from "./page/verify";
 import { createTool, type Tool } from "./tool";
 import type {
   Account,
@@ -36,6 +36,8 @@ import type {
   SdkUser,
   UserGetInput,
   UserLinkInput,
+  PageAuthRequestInput,
+  PageAuthResult,
 } from "./types";
 
 function shouldDebugLog(debug: boolean): boolean {
@@ -294,14 +296,15 @@ export class Konsier {
     }
   }
 
-  verifyPage() {
-    return createVerifyPageMiddleware({
-      apiKey: this.apiKey,
-      allowedClockSkewMs: this.allowedClockSkewMs,
-      debug: this.debug,
-    });
+  pageRequest(input: PageAuthRequestInput): PageAuthResult {
+    return resolvePageRequest(
+      {
+        apiKey: this.apiKey,
+        debug: this.debug,
+      },
+      input,
+    );
   }
-
   webhookPath(): string {
     if (!this.endpointUrl) {
       throw new KonsierError({

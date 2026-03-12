@@ -1,4 +1,9 @@
-import type { HeadersLike, HttpResponseLike, PageAuthContext } from "../types";
+import type {
+  HeadersLike,
+  HttpResponseLike,
+  PageAuthRequestInput,
+  PageAuthResult,
+} from "../types";
 import type { Konsier } from "../client";
 import { verifyPageRequest } from "./shared";
 
@@ -20,15 +25,20 @@ type FastifyReplyLike = {
   send: (payload: unknown) => unknown;
 };
 
+type FastifyRouteOptions = {
+  method: string;
+  url: string;
+  config?: {
+    rawBody?: boolean;
+  };
+  handler: (
+    request: FastifyRequestLike,
+    reply: FastifyReplyLike,
+  ) => Promise<void>;
+};
+
 export interface FastifyLike {
-  route: (options: {
-    method: "POST";
-    url: string;
-    handler: (
-      request: FastifyRequestLike,
-      reply: FastifyReplyLike,
-    ) => unknown | Promise<unknown>;
-  }) => unknown;
+  route: (options: FastifyRouteOptions) => unknown;
 }
 
 export function registerKonsier(
@@ -38,7 +48,13 @@ export function registerKonsier(
   fastify.route({
     method: "POST",
     url: konsier.webhookPath(),
-    handler: async (request, reply) => {
+    config: {
+      rawBody: true,
+    },
+    handler: async (
+      request: FastifyRequestLike,
+      reply: FastifyReplyLike,
+    ) => {
       await konsier.webhookHandler()(
         {
           method: request.raw?.method ?? request.method,
@@ -54,20 +70,45 @@ export function registerKonsier(
 
 export function verifyKonsierPageRequest(
   konsier: Konsier,
-  request: Request | Headers | HeadersLike | { headers: HeadersLike },
-): PageAuthContext {
-  if (request instanceof Request || request instanceof Headers) {
+  request:
+    | Request
+    | PageAuthRequestInput
+    | {
+        headers: HeadersLike;
+        url?: string;
+        raw?: {
+          url?: string;
+          headers: HeadersLike;
+        };
+        protocol?: string;
+      },
+): PageAuthResult {
+  if (request instanceof Request) {
     return verifyPageRequest(konsier, request);
   }
 
-  if ("headers" in request) {
-    return verifyPageRequest(
-      konsier,
-      (request as { headers: HeadersLike }).headers,
-    );
+  if ("url" in request && typeof request.url === "string" && "headers" in request) {
+    return verifyPageRequest(konsier, {
+      url: request.url,
+      headers: request.headers,
+    });
   }
 
-  return verifyPageRequest(konsier, request);
+  const rawRequest = "raw" in request ? request.raw : undefined;
+  const headers = rawRequest?.headers ?? request.headers;
+  const path = rawRequest?.url ?? request.url ?? "/";
+  const protocol =
+    firstHeaderValue(headers["x-forwarded-proto"]) ||
+    ("protocol" in request ? request.protocol : undefined) ||
+    "http";
+  const host = firstHeaderValue(headers["x-forwarded-host"]) ||
+    firstHeaderValue(headers.host) ||
+    "localhost";
+
+  return verifyPageRequest(konsier, {
+    url: `${protocol}://${host}${path}`,
+    headers,
+  });
 }
 
 function createReplyAdapter(reply: FastifyReplyLike): HttpResponseLike {
@@ -102,4 +143,13 @@ function createReplyAdapter(reply: FastifyReplyLike): HttpResponseLike {
       return this;
     },
   };
+}
+
+function firstHeaderValue(
+  value: string | string[] | undefined,
+): string | undefined {
+  if (Array.isArray(value)) {
+    return value[0];
+  }
+  return value;
 }

@@ -7,7 +7,7 @@ Smallest `konsier-node` sample app.
 - Express adapter via `serveKonsier(app, konsier)`
 - One public agent ref: `task_assistant`
 - One public local dashboard at `/`
-- One protected Konsier internal page at `/pages/tasks`
+- One protected owner page at `/pages/tasks`, launched directly on the app origin from Konsier
 - In-memory task state only
 
 ## Run
@@ -26,4 +26,4 @@ Open [http://localhost:3002](http://localhost:3002) for the local dashboard.
 2. Point the implementation endpoint to `http://localhost:3002/konsier`.
 3. Link a project agent to the ref `task_assistant`.
 4. Optionally connect Telegram in Konsier for quick channel testing.
-5. Open the internal page exposed by this app to verify `verifyKonsierPage()` works.
+5. Open the page from Konsier and verify the browser launch + redirect bootstrap flow works.

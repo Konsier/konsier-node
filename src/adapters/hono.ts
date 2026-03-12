@@ -1,6 +1,10 @@
-import type { PageAuthContext } from "../types";
+import type { PageAuthResult } from "../types";
 import type { Konsier } from "../client";
-import { handleFetchWebhook, verifyPageRequest } from "./shared";
+import {
+  handleFetchWebhook,
+  pageResultToResponse,
+  verifyPageRequest,
+} from "./shared";
 
 type HonoContextLike = {
   req: Request | { raw: Request };
@@ -30,6 +34,10 @@ export function serveKonsier(app: HonoLikeApp, konsier: Konsier): void {
 export function verifyKonsierPageRequest(
   konsier: Konsier,
   request: Request,
-): PageAuthContext {
-  return verifyPageRequest(konsier, request);
+): PageAuthResult | Response {
+  const result = verifyPageRequest(konsier, request);
+  if (result.type === "response") {
+    return pageResultToResponse(result);
+  }
+  return result;
 }

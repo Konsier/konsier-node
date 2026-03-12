@@ -1,15 +1,15 @@
 # Restaurant Manager Example
 
-High-complexity platform sample for connected restaurant projects.
+Fastify sample for connected restaurant projects.
 
 ## What it shows
 
-- Native Node `http` server with direct `webhookHandler()` usage
+- Fastify webhook registration with `registerKonsier(app, sdk)`
 - Two public agent refs:
   - `restaurant_customer`
   - `restaurant_worker`
 - Owner tooling exposed through `internal.tools`
-- Protected owner internal page at `/pages/ops`
+- Protected owner page at `/pages/ops`, launched directly from Konsier
 - Multi-tenant in-memory state partitioned by Konsier `account.id`
 
 ## Run
@@ -29,6 +29,5 @@ Set `KONSIER_ENDPOINT_URL` in `.env` when the app is reachable at a non-default 
 1. Use this app as the implementation endpoint for a platform project.
 2. Point Konsier at the same URL configured in `KONSIER_ENDPOINT_URL` or use the default `http://localhost:3004/konsier`.
 3. Expose the refs `restaurant_customer` and `restaurant_worker`.
-4. Open the dashboard and use the built-in connect button to start the account connection flow.
-5. Approve the connection from another Konsier project, then return to the callback page.
-6. Test tenant-aware behavior by opening the owner page from the connected restaurant account.
+4. Open the local dashboard to inspect tenant state.
+5. Open the owner page from Konsier to verify the direct-launch Fastify page flow.

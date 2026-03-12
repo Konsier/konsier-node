@@ -20,6 +20,20 @@
   --radius: 10px;
 }
 
+body.theme-dark {
+  --bg: #111827;
+  --surface: #1f2937;
+  --ink: #f9fafb;
+  --secondary: #cbd5e1;
+  --muted: #94a3b8;
+  --accent: #fb923c;
+  --accent-hover: #f97316;
+  --border: #334155;
+  --green: #4ade80;
+  --amber: #fbbf24;
+  --red: #f87171;
+}
+
 body {
   font-family: -apple-system, "Segoe UI", system-ui, sans-serif;
   background: var(--bg);
@@ -246,14 +260,26 @@ ul.tasks {
   color: var(--red);
 }
 
+body.theme-dark .badge-high {
+  background: rgba(248, 113, 113, 0.16);
+}
+
 .badge-medium {
   background: #fffbeb;
   color: var(--amber);
 }
 
+body.theme-dark .badge-medium {
+  background: rgba(251, 191, 36, 0.14);
+}
+
 .badge-low {
   background: #f0fdf4;
   color: var(--green);
+}
+
+body.theme-dark .badge-low {
+  background: rgba(74, 222, 128, 0.14);
 }
 
 .task-delete {
@@ -284,6 +310,10 @@ ul.tasks {
 .delete-btn:hover {
   background: #fef2f2;
   color: var(--red);
+}
+
+body.theme-dark .delete-btn:hover {
+  background: rgba(248, 113, 113, 0.12);
 }
 
 /* ── Empty State ── */

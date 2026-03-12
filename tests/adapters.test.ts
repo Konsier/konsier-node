@@ -4,7 +4,8 @@ import { serveKonsier, verifyKonsierPage as verifyExpressPage } from "../src/ada
 import { registerKonsier } from "../src/adapters/fastify";
 import { konsierWebhook, serveKonsier as serveHonoKonsier, verifyKonsierPageRequest as verifyHonoPage } from "../src/adapters/hono";
 import { createKonsierRoute, verifyKonsierPageRequest as verifyNextPage } from "../src/adapters/next";
-import { createKonsierSignature, createPageContextPayload } from "../src/protocol/signatures";
+import { PAGE_LAUNCH_QUERY_PARAM, PAGE_SESSION_COOKIE_NAME } from "../src/constants";
+import { createKonsierSignature, createPageLaunchToken } from "../src/protocol/signatures";
 import { Konsier } from "../src/client";
 
 function createSdk() {
@@ -47,39 +48,24 @@ function createSignedFetchRequest(apiKey: string, body: Record<string, unknown>)
   });
 }
 
-function createPageHeaders(apiKey: string) {
+function createLaunchToken(apiKey: string) {
   const pagePath = "/pages/orders";
-  const timestamp = Date.now().toString();
-  const signature = createKonsierSignature({
+  return createPageLaunchToken({
     apiKey,
-    timestamp,
-    payload: createPageContextPayload({
-      pagePath,
-      projectId: "10",
-      account: {
-        id: "10",
-        name: "Acme",
-        metadata: { restaurantId: "r_1" },
-      },
-      user: {
-        id: "u_1",
-        email: "owner@acme.com",
-        name: "Owner",
-      },
-    }),
-  });
-
-  return new Headers({
-    "x-konsier-timestamp": timestamp,
-    "x-konsier-signature": `sha256=${signature}`,
-    "x-konsier-page-path": pagePath,
-    "x-konsier-project-id": "10",
-    "x-konsier-account-id": "10",
-    "x-konsier-account-name": "Acme",
-    "x-konsier-account-metadata": JSON.stringify({ restaurantId: "r_1" }),
-    "x-konsier-user-id": "u_1",
-    "x-konsier-user-email": "owner@acme.com",
-    "x-konsier-user-name": "Owner",
+    pagePath,
+    projectId: "10",
+    account: {
+      id: "10",
+      name: "Acme",
+      metadata: { restaurantId: "r_1" },
+    },
+    user: {
+      id: "u_1",
+      email: "owner@acme.com",
+      name: "Owner",
+    },
+    theme: "dark",
+    exp: Date.now() + 60_000,
   });
 }
 
@@ -183,18 +169,65 @@ describe("framework adapters", () => {
     });
   });
 
-  it("verifies page requests through next and hono helpers", () => {
+  it("bootstraps page requests through next and hono helpers", async () => {
     const sdk = createSdk();
+    const launchToken = createLaunchToken("k_test_123");
     const request = new Request("https://example.com/pages/orders", {
-      headers: createPageHeaders("k_test_123"),
+      headers: {},
     });
+    const bootstrapUrl = new URL(request.url);
+    bootstrapUrl.searchParams.set(PAGE_LAUNCH_QUERY_PARAM, launchToken);
 
-    expect(verifyNextPage(sdk, request)).toMatchObject({
-      pagePath: "/pages/orders",
-    });
-    expect(verifyHonoPage(sdk, request)).toMatchObject({
-      pagePath: "/pages/orders",
-    });
+    const nextBootstrap = verifyNextPage(
+      sdk,
+      new Request(bootstrapUrl.toString()),
+    );
+    expect(nextBootstrap instanceof Response).toBe(true);
+    if (!(nextBootstrap instanceof Response)) {
+      throw new Error("Expected next bootstrap response");
+    }
+    expect(nextBootstrap.status).toBe(302);
+
+    const honoBootstrap = verifyHonoPage(
+      sdk,
+      new Request(bootstrapUrl.toString()),
+    );
+    expect(honoBootstrap instanceof Response).toBe(true);
+    if (!(honoBootstrap instanceof Response)) {
+      throw new Error("Expected hono bootstrap response");
+    }
+    expect(honoBootstrap.status).toBe(302);
+
+    const cookieHeader = nextBootstrap.headers.get("set-cookie");
+    expect(cookieHeader).toContain(`${PAGE_SESSION_COOKIE_NAME}=`);
+
+    const nextSession = verifyNextPage(
+      sdk,
+      new Request(request.url, {
+        headers: {
+          cookie: cookieHeader ?? "",
+        },
+      }),
+    );
+    if (nextSession instanceof Response || nextSession.type !== "authorized") {
+      throw new Error("Expected next session context");
+    }
+    expect(nextSession.context.pagePath).toBe("/pages/orders");
+    expect(nextSession.context.theme).toBe("dark");
+
+    const honoSession = verifyHonoPage(
+      sdk,
+      new Request(request.url, {
+        headers: {
+          cookie: cookieHeader ?? "",
+        },
+      }),
+    );
+    if (honoSession instanceof Response || honoSession.type !== "authorized") {
+      throw new Error("Expected hono session context");
+    }
+    expect(honoSession.context.pagePath).toBe("/pages/orders");
+    expect(honoSession.context.theme).toBe("dark");
   });
 
   it("syncs the current instance using its configured endpoint", async () => {
