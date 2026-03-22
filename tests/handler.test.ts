@@ -259,8 +259,90 @@ describe("webhookHandler", () => {
 
     expect(state.statusCode).toBe(500);
     expect(state.body).toEqual({
-      error: "Tool handlers must return a JSON object.",
+      error: "Tool handlers must return a JSON object or Konsier.end().",
       code: "INVALID_TOOL_OUTPUT",
+    });
+  });
+
+  it("serializes messages, attachments, and end controls from tool handlers", async () => {
+    const richSdk = new Konsier({
+      apiKey,
+      endpointUrl: "https://example.com/konsier",
+      agents: {
+        customer: {
+          systemPrompt: "Support",
+          tools: [
+            Konsier.tool({
+              name: "share_menu",
+              description: "Queue an attachment and stop",
+              input: z.object({}),
+              handler: async (_input, ctx) => {
+                expect(ctx.messages).toEqual([
+                  {
+                    text: "Show me tonight's specials",
+                    sentAt: "2026-03-10T00:00:00.000Z",
+                  },
+                ]);
+
+                ctx.attach({
+                  type: "image",
+                  url: "https://example.com/menu.jpg",
+                  name: "menu.jpg",
+                });
+                return Konsier.end();
+              },
+            }),
+          ],
+        },
+      },
+    });
+    const richHandler = richSdk.webhookHandler();
+
+    const body = {
+      type: "tool_call",
+      conversation: {
+        id: 1,
+        project_id: 10,
+        execution_project_id: 10,
+        started_at: "2026-03-10T00:00:00.000Z",
+        message_count: 1,
+      },
+      messages: [
+        {
+          text: "Show me tonight's specials",
+          sentAt: "2026-03-10T00:00:00.000Z",
+        },
+      ],
+      channel: "whatsapp",
+      target: {
+        type: "agent",
+        agent: "customer",
+      },
+      tool: {
+        name: "share_menu",
+        input: {},
+      },
+      account: null,
+      user: null,
+    };
+
+    const req = createSignedRequest(apiKey, body);
+    const { res, state } = createMockResponse();
+
+    await richHandler(req as never, res as never);
+
+    expect(state.statusCode).toBe(200);
+    expect(state.body).toEqual({
+      __konsier: {
+        end: true,
+        attachments: [
+          {
+            type: "image",
+            url: "https://example.com/menu.jpg",
+            name: "menu.jpg",
+          },
+        ],
+      },
     });
   });
 

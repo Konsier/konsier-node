@@ -1,7 +1,7 @@
 import { toJSONSchema } from "zod";
 
 import { KonsierError, toErrorMessage } from "./errors";
-import type { JsonObject, ToolContext } from "./types";
+import type { EndSignal, JsonObject, ToolContext } from "./types";
 
 const TOOL_NAME_REGEX = /^[a-zA-Z0-9_-]+$/;
 
@@ -23,7 +23,10 @@ export interface ToolDefinition<
   name: string;
   description: string;
   input: ToolInputSchema<TInput>;
-  handler: (input: TInput, context: ToolContext) => Promise<TOutput> | TOutput;
+  handler: (
+    input: TInput,
+    context: ToolContext,
+  ) => Promise<TOutput | EndSignal> | TOutput | EndSignal;
 }
 
 export interface Tool<
@@ -34,7 +37,10 @@ export interface Tool<
   description: string;
   inputSchema: Record<string, unknown>;
   parseInput: (input: unknown) => TInput;
-  handler: (input: TInput, context: ToolContext) => Promise<TOutput> | TOutput;
+  handler: (
+    input: TInput,
+    context: ToolContext,
+  ) => Promise<TOutput | EndSignal> | TOutput | EndSignal;
 }
 
 export function createTool<

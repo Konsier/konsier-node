@@ -25,6 +25,7 @@ import type {
   ConnectionCompleteResult,
   ConnectionStartInput,
   ConnectionStartResult,
+  EndSignal,
   InternalDefinition,
   InternalEntry,
   JsonObject,
@@ -189,6 +190,9 @@ export function createJsonBodyMiddleware(rawBodyProperty: string) {
 
 export class Konsier {
   static tool = createTool;
+  static end(): EndSignal {
+    return { __konsierEnd: true };
+  }
   readonly users: {
     get: (input: UserGetInput) => Promise<SdkUser>;
     link: (input: UserLinkInput) => Promise<SdkUser>;
@@ -328,7 +332,6 @@ export class Konsier {
           this.resolveAgentConfig(agent, account),
         resolveInternalDefinition: (account) =>
           this.resolveInternalEntry({ account }),
-        sendMessage: (input) => this.sendMessage(input),
       },
       handleResolveAgent: {
         resolveAgentConfig: (agent, account) =>

@@ -1,4 +1,4 @@
-import type { Attachment, Channel } from "../types";
+import type { Channel, ToolMessage } from "../types";
 
 export interface InboundAccount {
   id: number | string;
@@ -22,11 +22,7 @@ export interface ToolCallRequest {
     started_at: string;
     message_count: number;
   };
-  message: {
-    text?: string;
-    html?: string;
-    attachments?: Attachment[];
-  };
+  messages: ToolMessage[];
   channel: Channel;
   target:
     | {

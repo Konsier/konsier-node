@@ -6,6 +6,9 @@ export type JsonValue = JsonPrimitive | JsonObject | JsonValue[];
 export interface JsonObject {
   [key: string]: JsonValue;
 }
+export interface EndSignal {
+  readonly __konsierEnd: true;
+}
 
 export type Channel =
   | "telegram"
@@ -16,17 +19,122 @@ export type Channel =
   | "sms"
   | "konsier";
 
-export interface Attachment {
+export type AttachmentType =
+  | "image"
+  | "video"
+  | "audio"
+  | "file"
+  | "location";
+
+export interface FileAttachment {
+  id: string;
+  type: "image" | "video" | "audio" | "file";
+  name?: string;
+  caption?: string;
+  mimeType?: string;
   url: string;
-  type: "image" | "file" | "video" | "audio";
+  filename?: string;
+  originalName?: string;
+}
+
+export interface LocationAttachment {
+  id: string;
+  type: "location";
+  name?: string;
+  caption?: string;
+  mimeType?: string;
+  latitude: number;
+  longitude: number;
+  address?: string;
+}
+
+export type Attachment = FileAttachment | LocationAttachment;
+
+export interface QuickReply {
+  label: string;
+  value: string;
+}
+
+export interface ReplyPointer {
+  messageId: string;
+}
+
+export interface QuotedMessage {
+  messageId: string;
+  role: "user" | "assistant" | "system";
+  text?: string;
+  attachments?: Attachment[];
+  replyTo?: ReplyPointer | null;
+}
+
+export interface ReplyContext extends ReplyPointer {
+  message?: QuotedMessage;
+}
+
+export interface ToolMessage {
+  text?: string;
+  attachments?: Attachment[];
+  replyTo?: ReplyContext | null;
+  sentAt: string;
+}
+
+export interface MessageEnvelope {
+  text?: string;
+  attachments?: Attachment[];
+  quickReplies?: QuickReply[];
+  replyTo?: ReplyContext | null;
+  editedAt?: string | null;
+}
+
+export interface AttachmentInputBase {
+  type: AttachmentType;
   name?: string;
   mimeType?: string;
+  caption?: string;
 }
+
+export interface UrlAttachmentInput extends AttachmentInputBase {
+  url: string;
+  buffer?: never;
+  fileId?: never;
+}
+
+export interface BufferAttachmentInput extends AttachmentInputBase {
+  buffer: Buffer;
+  url?: never;
+  fileId?: never;
+}
+
+export interface FileIdAttachmentInput {
+  fileId: string;
+  type?: never;
+  name?: never;
+  mimeType?: never;
+  caption?: never;
+  url?: never;
+  buffer?: never;
+}
+
+export interface LocationAttachmentInput extends AttachmentInputBase {
+  type: "location";
+  latitude: number;
+  longitude: number;
+  address?: string;
+  url?: never;
+  buffer?: never;
+  fileId?: never;
+}
+
+export type AttachInput =
+  | UrlAttachmentInput
+  | BufferAttachmentInput
+  | FileIdAttachmentInput
+  | LocationAttachmentInput;
 
 export interface SendMessage {
   text?: string;
-  html?: string;
-  attachments?: Attachment[];
+  attachments?: AttachInput[];
+  quickReplies?: QuickReply[];
 }
 
 export interface SendInput extends SendMessage {
@@ -134,20 +242,14 @@ export interface Conversation {
   messageCount: number;
 }
 
-export interface ToolMessage {
-  text?: string;
-  html?: string;
-  attachments?: Attachment[];
-}
-
 export interface ToolContext {
   channel: Channel;
   agent: string;
   user: EndUser;
   conversation: Conversation;
-  message: ToolMessage;
+  messages: ToolMessage[];
   account: Account | null;
-  send: (message: SendMessage) => Promise<void>;
+  attach: (input: AttachInput | AttachInput[]) => void;
 }
 
 export interface AgentContext {

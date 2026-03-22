@@ -7,12 +7,13 @@ import type {
 } from "../protocol/inbound";
 import type {
   Account,
+  AttachInput,
   AgentConfig,
   Attachment,
   EndUser,
   InternalDefinition,
   JsonObject,
-  SendInput,
+  ToolMessage,
   ToolContext,
 } from "../types";
 
@@ -33,8 +34,35 @@ export interface ToolCallDependencies {
     account: Account | null,
   ) => Promise<AgentConfig>;
   resolveInternalDefinition: (account: Account | null) => Promise<InternalDefinition>;
-  sendMessage: (input: SendInput) => Promise<void>;
 }
+
+const TOOL_CONTROL_FIELD = "__konsier";
+
+type SerializedAttachInput =
+  | {
+      type: "image" | "video" | "audio" | "file";
+      url: string;
+      name?: string;
+      mimeType?: string;
+      caption?: string;
+    }
+  | {
+      type: "image" | "video" | "audio" | "file";
+      bufferBase64: string;
+      name?: string;
+      mimeType?: string;
+      caption?: string;
+    }
+  | {
+      fileId: string;
+    }
+  | {
+      type: "location";
+      latitude: number;
+      longitude: number;
+      name?: string;
+      address?: string;
+    };
 
 export function asToolCallRequest(payload: unknown): ToolCallRequest | null {
   const obj = asObject(payload);
@@ -45,12 +73,12 @@ export function asToolCallRequest(payload: unknown): ToolCallRequest | null {
   const target = parseTarget(obj.target);
   const channel = parseChannel(obj.channel);
   const conversation = parseConversation(obj.conversation);
-  const message = parseMessage(obj.message);
+  const messages = parseMessages(obj.messages, obj.message);
   const tool = parseTool(obj.tool);
   const account = parseInboundAccount(obj.account);
   const user = parseInboundUser(obj.user);
 
-  if (!target || !channel || !conversation || !message || !tool) {
+  if (!target || !channel || !conversation || !messages || !tool) {
     return null;
   }
 
@@ -65,7 +93,7 @@ export function asToolCallRequest(payload: unknown): ToolCallRequest | null {
   return {
     type: "tool_call",
     conversation,
-    message,
+    messages,
     channel,
     target,
     tool,
@@ -83,6 +111,7 @@ export async function executeToolCallRequest(
   const resolvedTool = await resolveTool(request, dependencies, account);
   const parsedInput = resolvedTool.parseInput(request.tool.input);
   const user = normalizeUser(request.user);
+  const queuedAttachments: AttachInput[] = [];
 
   debugLog(debug, "tool execution started", {
     target: request.target,
@@ -103,27 +132,17 @@ export async function executeToolCallRequest(
       startedAt: request.conversation.started_at,
       messageCount: request.conversation.message_count,
     },
-    message: request.message,
+    messages: request.messages,
     account,
-    send: async (message) => {
-      debugLog(debug, "tool context.send invoked", {
-        target: request.target,
-        tool: request.tool.name,
-        conversationId: request.conversation.id,
-        userId: user.id,
-        message,
-      });
-      await dependencies.sendMessage({
-        conversationId: request.conversation.id,
-        userId: user.id,
-        ...message,
-      });
+    attach: (input) => {
+      const items = Array.isArray(input) ? input : [input];
+      queuedAttachments.push(...items);
     },
   };
 
   try {
     const result = await resolvedTool.handler(parsedInput, context);
-    const output = assertToolOutput(result);
+    const output = buildToolCallResponse(result, queuedAttachments);
     debugLog(debug, "tool execution succeeded", {
       target: request.target,
       tool: request.tool.name,
@@ -178,15 +197,76 @@ async function resolveTool(
   return tool;
 }
 
-function assertToolOutput(output: unknown): JsonObject {
-  if (output && typeof output === "object" && !Array.isArray(output)) {
-    return output as JsonObject;
+function buildToolCallResponse(
+  output: unknown,
+  queuedAttachments: AttachInput[],
+): JsonObject {
+  const end = isEndSignal(output);
+  if (!end && (!output || typeof output !== "object" || Array.isArray(output))) {
+    throw new KonsierError({
+      code: "INVALID_TOOL_OUTPUT",
+      message: "Tool handlers must return a JSON object or Konsier.end().",
+      statusCode: 500,
+    });
   }
 
-  throw new KonsierError({
-    code: "INVALID_TOOL_OUTPUT",
-    message: "Tool handlers must return a JSON object.",
-    statusCode: 500,
+  const result = end ? {} : { ...(output as JsonObject) };
+  if (queuedAttachments.length === 0 && !end) {
+    return result;
+  }
+
+  return {
+    ...result,
+    [TOOL_CONTROL_FIELD]: {
+      end,
+      attachments: serializeAttachments(queuedAttachments),
+    },
+  };
+}
+
+function isEndSignal(value: unknown): boolean {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      "__konsierEnd" in value &&
+      (value as { __konsierEnd?: unknown }).__konsierEnd === true,
+  );
+}
+
+function serializeAttachments(attachments: AttachInput[]): SerializedAttachInput[] {
+  return attachments.map((attachment) => {
+    if ("fileId" in attachment) {
+      return { fileId: attachment.fileId };
+    }
+
+    if (attachment.type === "location") {
+      return {
+        type: "location",
+        latitude: attachment.latitude,
+        longitude: attachment.longitude,
+        ...(attachment.name ? { name: attachment.name } : {}),
+        ...(attachment.address ? { address: attachment.address } : {}),
+      };
+    }
+
+    if ("buffer" in attachment) {
+      return {
+        type: attachment.type,
+        bufferBase64: attachment.buffer.toString("base64"),
+        ...(attachment.name ? { name: attachment.name } : {}),
+        ...(attachment.mimeType ? { mimeType: attachment.mimeType } : {}),
+        ...(attachment.caption ? { caption: attachment.caption } : {}),
+      };
+    }
+
+    return {
+      type: attachment.type,
+      url: attachment.url,
+      ...(attachment.name ? { name: attachment.name } : {}),
+      ...(attachment.mimeType ? { mimeType: attachment.mimeType } : {}),
+      ...(attachment.caption ? { caption: attachment.caption } : {}),
+    };
   });
 }
 
@@ -304,33 +384,57 @@ function parseConversation(
   };
 }
 
-function parseMessage(value: unknown): ToolCallRequest["message"] | null {
-  if (value === null || value === undefined) {
-    return {};
+function parseMessages(
+  value: unknown,
+  legacyValue: unknown,
+): ToolCallRequest["messages"] | null {
+  if (Array.isArray(value)) {
+    const messages: ToolMessage[] = [];
+    for (const item of value) {
+      const parsed = parseMessage(item);
+      if (!parsed) {
+        return null;
+      }
+      messages.push(parsed);
+    }
+    return messages;
   }
 
+  if (value !== undefined) {
+    return null;
+  }
+
+  if (legacyValue === undefined || legacyValue === null) {
+    return [];
+  }
+
+  const legacyMessage = parseMessage(legacyValue);
+  return legacyMessage ? [legacyMessage] : null;
+}
+
+function parseMessage(value: unknown): ToolMessage | null {
   const obj = asObject(value);
   if (!obj) {
     return null;
   }
 
   const text = obj.text;
-  const html = obj.html;
   const attachments = obj.attachments;
+  const replyTo = obj.replyTo;
+  const sentAt = obj.sentAt;
 
-  if (
-    !(typeof text === "undefined" || typeof text === "string") ||
-    !(typeof html === "undefined" || typeof html === "string")
-  ) {
+  if (!(typeof text === "undefined" || typeof text === "string")) {
     return null;
   }
 
-  const normalized: ToolCallRequest["message"] = {};
+  const normalized: ToolMessage = {
+    sentAt:
+      typeof sentAt === "string" && sentAt.trim()
+        ? sentAt
+        : new Date(0).toISOString(),
+  };
   if (typeof text === "string") {
     normalized.text = text;
-  }
-  if (typeof html === "string") {
-    normalized.html = html;
   }
   if (typeof attachments !== "undefined") {
     const parsedAttachments = parseAttachments(attachments);
@@ -338,6 +442,13 @@ function parseMessage(value: unknown): ToolCallRequest["message"] | null {
       return null;
     }
     normalized.attachments = parsedAttachments;
+  }
+  if (typeof replyTo !== "undefined") {
+    const parsedReplyTo = parseReplyContext(replyTo);
+    if (!parsedReplyTo) {
+      return null;
+    }
+    normalized.replyTo = parsedReplyTo;
   }
 
   return normalized;
@@ -356,26 +467,127 @@ function parseAttachments(value: unknown): Attachment[] | null {
     }
 
     if (
-      typeof record.url !== "string" ||
-      !["image", "file", "video", "audio"].includes(String(record.type))
+      typeof record.id !== "string" ||
+      !["image", "file", "video", "audio", "location"].includes(
+        String(record.type),
+      )
     ) {
       return null;
     }
 
-    const attachment: Attachment = {
+    if (record.type === "location") {
+      if (
+        typeof record.latitude !== "number" ||
+        typeof record.longitude !== "number"
+      ) {
+        return null;
+      }
+      attachments.push({
+        id: record.id,
+        type: "location",
+        latitude: record.latitude,
+        longitude: record.longitude,
+        ...(typeof record.name === "string" ? { name: record.name } : {}),
+        ...(typeof record.address === "string"
+          ? { address: record.address }
+          : {}),
+      });
+      continue;
+    }
+
+    if (typeof record.url !== "string") {
+      return null;
+    }
+
+    attachments.push({
+      id: record.id,
       url: record.url,
       type: record.type as Attachment["type"],
-    };
-    if (typeof record.name === "string") {
-      attachment.name = record.name;
-    }
-    if (typeof record.mimeType === "string") {
-      attachment.mimeType = record.mimeType;
-    }
-    attachments.push(attachment);
+      ...(typeof record.name === "string" ? { name: record.name } : {}),
+      ...(typeof record.caption === "string" ? { caption: record.caption } : {}),
+      ...(typeof record.mimeType === "string"
+        ? { mimeType: record.mimeType }
+        : {}),
+      ...(typeof record.filename === "string"
+        ? { filename: record.filename }
+        : {}),
+      ...(typeof record.originalName === "string"
+        ? { originalName: record.originalName }
+        : {}),
+    });
   }
 
   return attachments;
+}
+
+function parseReplyContext(value: unknown): ToolMessage["replyTo"] | null {
+  if (value === null) {
+    return null;
+  }
+
+  const obj = asObject(value);
+  if (!obj || typeof obj.messageId !== "string") {
+    return null;
+  }
+
+  if (typeof obj.message === "undefined") {
+    return { messageId: obj.messageId };
+  }
+
+  const message = parseQuotedMessage(obj.message);
+  if (!message) {
+    return null;
+  }
+
+  return {
+    messageId: obj.messageId,
+    message,
+  };
+}
+
+function parseQuotedMessage(value: unknown): ToolMessage["replyTo"] extends {
+  message?: infer T;
+}
+  ? T
+  : never | null {
+  const obj = asObject(value);
+  if (!obj || typeof obj.messageId !== "string" || typeof obj.role !== "string") {
+    return null;
+  }
+
+  if (!["user", "assistant", "system"].includes(obj.role)) {
+    return null;
+  }
+
+  const attachments =
+    typeof obj.attachments === "undefined"
+      ? undefined
+      : parseAttachments(obj.attachments);
+  if (typeof obj.attachments !== "undefined" && !attachments) {
+    return null;
+  }
+
+  if (typeof obj.replyTo === "undefined") {
+    return {
+      messageId: obj.messageId,
+      role: obj.role as "user" | "assistant" | "system",
+      ...(typeof obj.text === "string" ? { text: obj.text } : {}),
+      ...(attachments ? { attachments } : {}),
+    };
+  }
+
+  const replyTo = asObject(obj.replyTo);
+  if (!replyTo || typeof replyTo.messageId !== "string") {
+    return null;
+  }
+
+  return {
+    messageId: obj.messageId,
+    role: obj.role as "user" | "assistant" | "system",
+    ...(typeof obj.text === "string" ? { text: obj.text } : {}),
+    ...(attachments ? { attachments } : {}),
+    replyTo: { messageId: replyTo.messageId },
+  };
 }
 
 function parseTool(value: unknown): ToolCallRequest["tool"] | null {
