@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## v0.3.0 - 2026-03-23
+
+### Features
+
+- support title-based task references in todo example (181395e)
+- add attachment helper tool inputs (8b122a8)
+- add tool call message controls (b6a21ab)
+
 ## v0.2.2 - 2026-03-12
 
 ### Refactors
