@@ -239,6 +239,60 @@ ul.tasks {
   font-weight: 500;
 }
 
+.attachment-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.attachment-item {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: color-mix(in srgb, var(--surface) 82%, var(--bg));
+}
+
+.attachment-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.attachment-name {
+  font-size: 0.82rem;
+  font-weight: 600;
+  line-height: 1.3;
+  word-break: break-word;
+}
+
+.attachment-meta {
+  margin-top: 4px;
+  font-size: 0.74rem;
+  color: var(--secondary);
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.attachment-links {
+  display: flex;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.attachment-links a {
+  color: var(--accent);
+  font-size: 0.76rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.attachment-links a:hover {
+  color: var(--accent-hover);
+  text-decoration: underline;
+}
+
 .done .task-title {
   text-decoration: line-through;
   color: var(--muted);
@@ -280,6 +334,16 @@ body.theme-dark .badge-medium {
 
 body.theme-dark .badge-low {
   background: rgba(74, 222, 128, 0.14);
+}
+
+.badge-neutral {
+  background: #eef2ff;
+  color: #4338ca;
+}
+
+body.theme-dark .badge-neutral {
+  background: rgba(129, 140, 248, 0.16);
+  color: #c7d2fe;
 }
 
 .task-delete {

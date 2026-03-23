@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { Konsier } from "konsier";
+import { Konsier, type AttachInput } from "konsier";
 import { z } from "zod";
 
 import {
@@ -17,8 +17,46 @@ import {
   updatePrice,
 } from "./store";
 
+function resolveMarketplaceOrigin(): string {
+  const endpointUrl = process.env.KONSIER_ENDPOINT_URL?.trim();
+  if (endpointUrl) {
+    try {
+      const parsed = new URL(endpointUrl);
+      parsed.pathname =
+        parsed.pathname.replace(/\/api\/konsier\/?$/, "") || "/";
+      parsed.search = "";
+      parsed.hash = "";
+      return parsed.toString().replace(/\/+$/, "");
+    } catch {
+      // Fall through to local default below.
+    }
+  }
+
+  return `http://localhost:${process.env.PORT ?? "3003"}`;
+}
+
+function toProductAttachments(product: { name: string; imagePath?: string }) {
+  if (!product.imagePath) {
+    return [];
+  }
+
+  const fileName = product.imagePath.split("/").at(-1);
+
+  return [
+    {
+      type: "image",
+      url: new URL(
+        product.imagePath,
+        `${resolveMarketplaceOrigin()}/`,
+      ).toString(),
+      ...(fileName ? { name: fileName } : {}),
+      caption: product.name,
+    },
+  ] satisfies AttachInput[];
+}
+
 const searchProductsTool = Konsier.tool({
-  name: "search_products",
+  name: "Search Products",
   description: "Search the public catalog for available products.",
   input: z.object({
     query: z.string().optional(),
@@ -32,23 +70,50 @@ const searchProductsTool = Konsier.tool({
 });
 
 const viewProductTool = Konsier.tool({
-  name: "view_product",
+  name: "View Product",
   description: "Load detailed information for one product.",
   input: z.object({
     productId: z.string().min(1),
   }),
-  handler: async (input) => {
+  handler: async (input, ctx) => {
     const product = getProduct(input.productId);
     if (!product) {
       throw new Error(`Product "${input.productId}" was not found.`);
     }
 
-    return { product };
+    // const latestMessage = ctx.messages.at(-1)?.text?.toLowerCase() ?? "";
+    // const wantsPhotos = [
+    //   "photo",
+    //   "photos",
+    //   "image",
+    //   "images",
+    //   "picture",
+    //   "pictures",
+    // ].some((keyword) => latestMessage.includes(keyword));
+    const attachments = toProductAttachments(product);
+
+    // if (attachments.length > 0 && wantsPhotos) {
+    //   return ctx.end({
+    //     text: `${product.name} is $${product.price}. Here are a few product photos.`,
+    //     attachments,
+    //   });
+    // }
+
+    if (attachments.length > 0) {
+      ctx.attach(attachments);
+    }
+
+    return {
+      ...("imagePath" in product
+        ? (({ imagePath: _imagePath, ...rest }) => rest)(product)
+        : product),
+      // latestShopperMessage: ctx.messages.at(-1)?.text ?? null,
+    };
   },
 });
 
 const addToCartTool = Konsier.tool({
-  name: "add_to_cart",
+  name: "Add To Cart",
   description: "Add a product to the current shopper cart.",
   input: z.object({
     productId: z.string().min(1),
@@ -69,7 +134,7 @@ const addToCartTool = Konsier.tool({
 });
 
 const viewCartTool = Konsier.tool({
-  name: "view_cart",
+  name: "View Cart",
   description: "Inspect the current shopper cart.",
   input: z.object({}),
   handler: async (_input, ctx) => {
@@ -80,7 +145,7 @@ const viewCartTool = Konsier.tool({
 });
 
 const removeFromCartTool = Konsier.tool({
-  name: "remove_from_cart",
+  name: "Remove From Cart",
   description: "Remove one product from the current shopper cart.",
   input: z.object({
     productId: z.string().min(1),
@@ -93,7 +158,7 @@ const removeFromCartTool = Konsier.tool({
 });
 
 const checkoutQuoteTool = Konsier.tool({
-  name: "checkout_quote",
+  name: "Checkout Quote",
   description: "Create a mock quote for the current cart and clear it.",
   input: z.object({
     notes: z.string().optional(),
@@ -112,7 +177,7 @@ const checkoutQuoteTool = Konsier.tool({
 });
 
 const listProductsTool = Konsier.tool({
-  name: "list_products",
+  name: "List Products",
   description: "List every product, including unavailable items.",
   input: z.object({}),
   handler: async () => {
@@ -123,7 +188,7 @@ const listProductsTool = Konsier.tool({
 });
 
 const createProductTool = Konsier.tool({
-  name: "create_product",
+  name: "Create Product",
   description: "Create a new mock product for owner workflows.",
   input: z.object({
     name: z.string().min(1),
@@ -140,7 +205,7 @@ const createProductTool = Konsier.tool({
 });
 
 const updatePriceTool = Konsier.tool({
-  name: "update_price",
+  name: "Update Price",
   description: "Update the listed price for a product.",
   input: z.object({
     productId: z.string().min(1),
@@ -157,7 +222,7 @@ const updatePriceTool = Konsier.tool({
 });
 
 const setInventoryTool = Konsier.tool({
-  name: "set_inventory",
+  name: "Set Inventory",
   description: "Replace the current product inventory count.",
   input: z.object({
     productId: z.string().min(1),
@@ -174,7 +239,7 @@ const setInventoryTool = Konsier.tool({
 });
 
 const toggleAvailabilityTool = Konsier.tool({
-  name: "toggle_availability",
+  name: "Toggle Availability",
   description: "Publish or hide a product from the shopper catalog.",
   input: z.object({
     productId: z.string().min(1),
@@ -192,6 +257,7 @@ const toggleAvailabilityTool = Konsier.tool({
 
 export const sdk = new Konsier({
   apiKey: process.env.KONSIER_API_KEY ?? "",
+  debug: true,
   endpointUrl:
     process.env.KONSIER_ENDPOINT_URL ??
     `http://localhost:${process.env.PORT ?? "3003"}/api/konsier`,
@@ -225,3 +291,33 @@ export const sdk = new Konsier({
     ],
   },
 });
+
+let marketplaceSyncPromise: Promise<void> | null = null;
+
+export async function ensureMarketplaceSdkSynced(): Promise<void> {
+  if (marketplaceSyncPromise) {
+    return marketplaceSyncPromise;
+  }
+
+  marketplaceSyncPromise = sdk
+    .sync()
+    .then(() => {
+      console.log("[marketplace-example] sdk sync succeeded", {
+        endpointUrl:
+          process.env.KONSIER_ENDPOINT_URL ??
+          `http://localhost:${process.env.PORT ?? "3003"}/api/konsier`,
+      });
+    })
+    .catch((error) => {
+      marketplaceSyncPromise = null;
+      console.error("[marketplace-example] sdk sync failed", {
+        endpointUrl:
+          process.env.KONSIER_ENDPOINT_URL ??
+          `http://localhost:${process.env.PORT ?? "3003"}/api/konsier`,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    });
+
+  return marketplaceSyncPromise;
+}

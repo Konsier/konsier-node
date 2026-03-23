@@ -1,3 +1,4 @@
+import { inspect } from "node:util";
 import {
   DEFAULT_ALLOWED_CLOCK_SKEW_MS,
   HEADER_SIGNATURE,
@@ -87,6 +88,7 @@ export function createHandler(dependencies: HandlerDependencies) {
         debugLog(debug, "tool_call handled", {
           agent: toolCall.target.type === "agent" ? toolCall.target.agent : null,
           tool: toolCall.tool,
+          output: response,
         });
         sendJson(res, 200, response);
         return;
@@ -170,7 +172,17 @@ function debugLog(
   if (!debug || process.env.NODE_ENV !== "development") {
     return;
   }
-  console.log("[konsier] handler", meta ? { message, ...meta } : { message });
+  const payload = meta ? { message, ...meta } : { message };
+  console.log("[konsier] handler", serializeForLog(payload));
+}
+
+function serializeForLog(value: unknown): string {
+  return inspect(value, {
+    depth: null,
+    colors: false,
+    compact: false,
+    breakLength: 120,
+  });
 }
 
 function asManifestRequest(payload: unknown): {

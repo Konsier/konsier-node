@@ -130,7 +130,7 @@ describe("framework adapters", () => {
 
     registerKonsier(
       {
-        route(options) {
+        route(options: { method: string; url: string }) {
           routes.push(`${options.method}:${options.url}`);
         },
       },

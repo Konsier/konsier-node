@@ -31,7 +31,11 @@ export default function HomePage() {
         {products.map((product) => (
           <article className="product-card" key={product.id}>
             <div className={`product-image ${categoryClass(product.category)}`}>
-              {CATEGORY_ICONS[product.category] ?? "\uD83D\uDCE6"}
+              {product.imagePath ? (
+                <img src={product.imagePath} alt={product.name} />
+              ) : (
+                CATEGORY_ICONS[product.category] ?? "\uD83D\uDCE6"
+              )}
             </div>
             <div className="product-body">
               <div className="product-category">{product.category}</div>

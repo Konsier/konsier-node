@@ -77,7 +77,7 @@
     "release:bump": "node scripts/release-bump.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit && npm --prefix examples/todo run typecheck && npm --prefix examples/restaurant-manager run typecheck && npm --prefix examples/marketplace run typecheck"
   },
   "dependencies": {
     "zod": "^4.3.6"

@@ -1,3 +1,4 @@
+import { inspect } from "node:util";
 import { KonsierError } from "../errors";
 import type {
   InboundAccount,
@@ -10,9 +11,13 @@ import type {
   AttachInput,
   AgentConfig,
   Attachment,
+  AttachmentType,
+  EndSignal,
   EndUser,
   InternalDefinition,
   JsonObject,
+  QuotedMessage,
+  SendMessage,
   ToolMessage,
   ToolContext,
 } from "../types";
@@ -54,7 +59,7 @@ type SerializedAttachInput =
       caption?: string;
     }
   | {
-      fileId: string;
+      attachmentId: string;
     }
   | {
       type: "location";
@@ -138,6 +143,10 @@ export async function executeToolCallRequest(
       const items = Array.isArray(input) ? input : [input];
       queuedAttachments.push(...items);
     },
+    end: (message) => ({
+      __konsierEnd: true,
+      ...(message ? { message } : {}),
+    }),
   };
 
   try {
@@ -173,7 +182,7 @@ async function resolveTool(
 ) {
   if (request.target.type === "agent") {
     const agent = await dependencies.resolveAgentConfig(request.target.agent, account);
-    const tool = agent.tools.find((entry) => entry.name === request.tool.name);
+    const tool = agent.tools.find((entry) => entry.key === request.tool.name);
     if (!tool) {
       throw new KonsierError({
         code: "TOOL_NOT_FOUND",
@@ -185,7 +194,7 @@ async function resolveTool(
   }
 
   const internal = await dependencies.resolveInternalDefinition(account);
-  const tool = (internal.tools ?? []).find((entry) => entry.name === request.tool.name);
+  const tool = (internal.tools ?? []).find((entry) => entry.key === request.tool.name);
   if (!tool) {
     throw new KonsierError({
       code: "TOOL_NOT_FOUND",
@@ -201,46 +210,73 @@ function buildToolCallResponse(
   output: unknown,
   queuedAttachments: AttachInput[],
 ): JsonObject {
-  const end = isEndSignal(output);
+  const end = asEndSignal(output);
   if (!end && (!output || typeof output !== "object" || Array.isArray(output))) {
     throw new KonsierError({
       code: "INVALID_TOOL_OUTPUT",
-      message: "Tool handlers must return a JSON object or Konsier.end().",
+      message: "Tool handlers must return a JSON object or return ctx.end(...).",
       statusCode: 500,
     });
   }
 
-  const result = end ? {} : { ...(output as JsonObject) };
-  if (queuedAttachments.length === 0 && !end) {
+  const endMessage = end?.message;
+  const result = end ? serializeEndMessage(endMessage) : { ...(output as JsonObject) };
+  const attachments = [
+    ...queuedAttachments,
+    ...(endMessage?.attachments ?? []),
+  ];
+  if (attachments.length === 0 && !end) {
     return result;
   }
 
   return {
     ...result,
     [TOOL_CONTROL_FIELD]: {
-      end,
-      attachments: serializeAttachments(queuedAttachments),
+      end: Boolean(end),
+      attachments: serializeAttachments(attachments),
     },
   };
 }
 
-function isEndSignal(value: unknown): boolean {
-  return Boolean(
-    value &&
-      typeof value === "object" &&
-      !Array.isArray(value) &&
-      "__konsierEnd" in value &&
-      (value as { __konsierEnd?: unknown }).__konsierEnd === true,
-  );
+function asEndSignal(value: unknown): EndSignal | null {
+  if (
+    !value ||
+    typeof value !== "object" ||
+    Array.isArray(value) ||
+    !("__konsierEnd" in value) ||
+    (value as { __konsierEnd?: unknown }).__konsierEnd !== true
+  ) {
+    return null;
+  }
+
+  return value as EndSignal;
+}
+
+function serializeEndMessage(message: SendMessage | undefined): JsonObject {
+  if (!message) {
+    return {};
+  }
+
+  const result: JsonObject = {};
+  if (typeof message.text === "string" && message.text.trim().length > 0) {
+    result.text = message.text;
+  }
+  if (Array.isArray(message.quickReplies) && message.quickReplies.length > 0) {
+    result.quickReplies = message.quickReplies.map((reply) => ({
+      label: reply.label,
+      value: reply.value,
+    }));
+  }
+  return result;
 }
 
 function serializeAttachments(attachments: AttachInput[]): SerializedAttachInput[] {
   return attachments.map((attachment) => {
-    if ("fileId" in attachment) {
-      return { fileId: attachment.fileId };
+    if ("attachmentId" in attachment) {
+      return { attachmentId: attachment.attachmentId };
     }
 
-    if (attachment.type === "location") {
+    if ("latitude" in attachment) {
       return {
         type: "location",
         latitude: attachment.latitude,
@@ -252,7 +288,7 @@ function serializeAttachments(attachments: AttachInput[]): SerializedAttachInput
 
     if ("buffer" in attachment) {
       return {
-        type: attachment.type,
+        type: attachment.type as Exclude<AttachmentType, "location">,
         bufferBase64: attachment.buffer.toString("base64"),
         ...(attachment.name ? { name: attachment.name } : {}),
         ...(attachment.mimeType ? { mimeType: attachment.mimeType } : {}),
@@ -261,7 +297,7 @@ function serializeAttachments(attachments: AttachInput[]): SerializedAttachInput
     }
 
     return {
-      type: attachment.type,
+      type: attachment.type as Exclude<AttachmentType, "location">,
       url: attachment.url,
       ...(attachment.name ? { name: attachment.name } : {}),
       ...(attachment.mimeType ? { mimeType: attachment.mimeType } : {}),
@@ -314,7 +350,17 @@ function debugLog(
   if (!debug || process.env.NODE_ENV !== "development") {
     return;
   }
-  console.log("[konsier] tool_call", meta ? { message, ...meta } : { message });
+  const payload = meta ? { message, ...meta } : { message };
+  console.log("[konsier] tool_call", serializeForLog(payload));
+}
+
+function serializeForLog(value: unknown): string {
+  return inspect(value, {
+    depth: null,
+    colors: false,
+    compact: false,
+    breakLength: 120,
+  });
 }
 
 function asObject(value: unknown): Record<string, unknown> | null {
@@ -502,7 +548,7 @@ function parseAttachments(value: unknown): Attachment[] | null {
     attachments.push({
       id: record.id,
       url: record.url,
-      type: record.type as Attachment["type"],
+      type: record.type as Exclude<AttachmentType, "location">,
       ...(typeof record.name === "string" ? { name: record.name } : {}),
       ...(typeof record.caption === "string" ? { caption: record.caption } : {}),
       ...(typeof record.mimeType === "string"
@@ -545,19 +591,16 @@ function parseReplyContext(value: unknown): ToolMessage["replyTo"] | null {
   };
 }
 
-function parseQuotedMessage(value: unknown): ToolMessage["replyTo"] extends {
-  message?: infer T;
-}
-  ? T
-  : never | null {
+function parseQuotedMessage(value: unknown): QuotedMessage | null {
   const obj = asObject(value);
   if (!obj || typeof obj.messageId !== "string" || typeof obj.role !== "string") {
     return null;
   }
 
-  if (!["user", "assistant", "system"].includes(obj.role)) {
+  if (!["user", "assistant"].includes(obj.role)) {
     return null;
   }
+  const role = obj.role as QuotedMessage["role"];
 
   const attachments =
     typeof obj.attachments === "undefined"
@@ -570,7 +613,7 @@ function parseQuotedMessage(value: unknown): ToolMessage["replyTo"] extends {
   if (typeof obj.replyTo === "undefined") {
     return {
       messageId: obj.messageId,
-      role: obj.role as "user" | "assistant" | "system",
+      role,
       ...(typeof obj.text === "string" ? { text: obj.text } : {}),
       ...(attachments ? { attachments } : {}),
     };
@@ -583,7 +626,7 @@ function parseQuotedMessage(value: unknown): ToolMessage["replyTo"] extends {
 
   return {
     messageId: obj.messageId,
-    role: obj.role as "user" | "assistant" | "system",
+    role,
     ...(typeof obj.text === "string" ? { text: obj.text } : {}),
     ...(attachments ? { attachments } : {}),
     replyTo: { messageId: replyTo.messageId },

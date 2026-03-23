@@ -37,15 +37,15 @@ type FastifyRouteOptions = {
   ) => Promise<void>;
 };
 
-export interface FastifyLike {
-  route: (options: FastifyRouteOptions) => unknown;
-}
-
 export function registerKonsier(
-  fastify: FastifyLike,
+  fastify: {
+    route: unknown;
+  },
   konsier: Konsier,
 ): void {
-  fastify.route({
+  const route = fastify.route as (options: FastifyRouteOptions) => unknown;
+
+  route({
     method: "POST",
     url: konsier.webhookPath(),
     config: {

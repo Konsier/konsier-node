@@ -7,12 +7,14 @@ export type {
   AgentEvents,
   AgentManifestEntry,
   Attachment,
+  AudioAttachment,
   AttachmentType,
   AttachInput,
   Channel,
-  EndSignal,
+  FileAttachment,
   HttpRequestLike,
   HttpResponseLike,
+  ImageAttachment,
   InternalContext,
   InternalDefinition,
   InternalEntry,
@@ -43,6 +45,8 @@ export type {
   ToolContext,
   UserGetInput,
   UserLinkInput,
+  VideoAttachment,
+  LocationAttachment,
 } from "./types";
 
 export type {
@@ -55,4 +59,10 @@ export type {
   ToolCallResponse,
 } from "./protocol/inbound";
 
-export type { Tool, ToolDefinition, ToolInputSchema } from "./tool";
+export type {
+  Tool,
+  ToolDefinition,
+  ToolInputSchema,
+  AttachmentSchema,
+  AttachmentSchemaValue,
+} from "./tool";

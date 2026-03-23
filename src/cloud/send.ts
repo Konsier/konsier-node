@@ -1,6 +1,7 @@
 import { KonsierError } from "../errors";
 import type {
   AttachInput,
+  AttachmentType,
   SendInput,
 } from "../types";
 import type { CloudApiClient } from "./http";
@@ -21,7 +22,7 @@ type SerializedAttachInput =
       caption?: string;
     }
   | {
-      fileId: string;
+      attachmentId: string;
     }
   | {
       type: "location";
@@ -39,11 +40,11 @@ function serializeAttachments(
   }
 
   return attachments.map((attachment) => {
-    if ("fileId" in attachment) {
-      return { fileId: attachment.fileId };
+    if ("attachmentId" in attachment) {
+      return { attachmentId: attachment.attachmentId };
     }
 
-    if (attachment.type === "location") {
+    if ("latitude" in attachment) {
       return {
         type: "location",
         latitude: attachment.latitude,
@@ -55,7 +56,7 @@ function serializeAttachments(
 
     if ("buffer" in attachment) {
       return {
-        type: attachment.type,
+        type: attachment.type as Exclude<AttachmentType, "location">,
         bufferBase64: attachment.buffer.toString("base64"),
         ...(attachment.name ? { name: attachment.name } : {}),
         ...(attachment.mimeType ? { mimeType: attachment.mimeType } : {}),
@@ -64,7 +65,7 @@ function serializeAttachments(
     }
 
     return {
-      type: attachment.type,
+      type: attachment.type as Exclude<AttachmentType, "location">,
       url: attachment.url,
       ...(attachment.name ? { name: attachment.name } : {}),
       ...(attachment.mimeType ? { mimeType: attachment.mimeType } : {}),

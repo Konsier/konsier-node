@@ -13,7 +13,7 @@ import { sendMessage } from "./cloud/send";
 import { KonsierError } from "./errors";
 import { createHandler } from "./handler";
 import { resolvePageRequest } from "./page/verify";
-import { createTool, type Tool } from "./tool";
+import { attachment, createTool, type Tool } from "./tool";
 import type {
   Account,
   AccountGetInput,
@@ -25,7 +25,6 @@ import type {
   ConnectionCompleteResult,
   ConnectionStartInput,
   ConnectionStartResult,
-  EndSignal,
   InternalDefinition,
   InternalEntry,
   JsonObject,
@@ -190,9 +189,7 @@ export function createJsonBodyMiddleware(rawBodyProperty: string) {
 
 export class Konsier {
   static tool = createTool;
-  static end(): EndSignal {
-    return { __konsierEnd: true };
-  }
+  static attachment = attachment;
   readonly users: {
     get: (input: UserGetInput) => Promise<SdkUser>;
     link: (input: UserLinkInput) => Promise<SdkUser>;
@@ -512,19 +509,19 @@ export class Konsier {
       });
     }
 
-    const names = new Set<string>();
+    const keys = new Set<string>();
     return tools.map((tool) => {
       this.validateTool(tool, owner, statusCode);
-      if (names.has(tool.name)) {
+      if (keys.has(tool.key)) {
         throw new KonsierError({
           code: "DUPLICATE_TOOL_NAME",
-          message: `${owner} contains duplicate tool "${tool.name}".`,
+          message: `${owner} contains duplicate normalized tool key "${tool.key}" from "${tool.name}".`,
           statusCode,
         });
       }
-      names.add(tool.name);
+      keys.add(tool.key);
       return {
-        name: tool.name,
+        name: tool.key,
         description: tool.description,
         input: tool.inputSchema,
       };
@@ -589,6 +586,14 @@ export class Konsier {
       throw new KonsierError({
         code: "INVALID_TOOL",
         message: `${owner} includes a tool with no name.`,
+        statusCode,
+      });
+    }
+
+    if (!tool.key || typeof tool.key !== "string") {
+      throw new KonsierError({
+        code: "INVALID_TOOL",
+        message: `${owner} includes a tool with no normalized key.`,
         statusCode,
       });
     }

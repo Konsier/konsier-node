@@ -9,6 +9,7 @@ type Product = {
   available: boolean;
   featured: boolean;
   description: string;
+  imagePath?: string;
 };
 
 type CartLineState = {
@@ -48,6 +49,7 @@ const products: Product[] = [
     available: true,
     featured: true,
     description: "Stoneware mug with a satin glaze and thick cafe handle.",
+    imagePath: "/products/amber-studio-mug.jpg",
   },
   {
     id: "prod_canvas_tote",
@@ -59,6 +61,7 @@ const products: Product[] = [
     featured: false,
     description:
       "Heavy canvas everyday tote with inside pocket and brass snap.",
+    imagePath: "/products/market-canvas-tote.jpg",
   },
   {
     id: "prod_lantern",
@@ -69,6 +72,7 @@ const products: Product[] = [
     available: true,
     featured: true,
     description: "Oak-framed table lantern with warm glass diffuser.",
+    imagePath: "/products/oak-lantern.jpg",
   },
   {
     id: "prod_throw",

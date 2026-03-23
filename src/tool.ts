@@ -1,13 +1,30 @@
-import { toJSONSchema } from "zod";
+import { z, toJSONSchema } from "zod";
 
 import { KonsierError, toErrorMessage } from "./errors";
-import type { EndSignal, JsonObject, ToolContext } from "./types";
+import type {
+  AttachmentType,
+  AudioAttachment,
+  EndSignal,
+  FileAttachment,
+  ImageAttachment,
+  JsonObject,
+  LocationAttachment,
+  ToolContext,
+  VideoAttachment,
+} from "./types";
 
-const TOOL_NAME_REGEX = /^[a-zA-Z0-9_-]+$/;
+const TOOL_KEY_REGEX = /^[a-zA-Z0-9_-]+$/;
+const ATTACHMENT_REF_PATTERN = "^att:[^\\s]+$";
+const KONSIER_SCHEMA_KEY = "x-konsier";
 
 type SafeParseResult<T> =
   | { success: true; data: T }
   | { success: false; error: unknown };
+
+type AttachmentSchemaMetadata = {
+  kind: "attachment";
+  allowed_types: AttachmentType[];
+};
 
 export interface ToolInputSchema<TInput> {
   parse?: (input: unknown) => TInput;
@@ -34,6 +51,7 @@ export interface Tool<
   TOutput extends JsonObject = JsonObject,
 > {
   name: string;
+  key: string;
   description: string;
   inputSchema: Record<string, unknown>;
   parseInput: (input: unknown) => TInput;
@@ -56,13 +74,7 @@ export function createTool<
     });
   }
 
-  if (!TOOL_NAME_REGEX.test(name)) {
-    throw new KonsierError({
-      code: "INVALID_TOOL_NAME",
-      message: `Tool name \"${name}\" contains invalid characters.`,
-      statusCode: 400,
-    });
-  }
+  const key = normalizeToolKey(name);
 
   const description = definition.description?.trim();
   if (!description) {
@@ -85,6 +97,7 @@ export function createTool<
 
   return {
     name,
+    key,
     description,
     inputSchema,
     parseInput(input: unknown): TInput {
@@ -92,6 +105,96 @@ export function createTool<
     },
     handler: definition.handler,
   };
+}
+
+function attachmentSchemaMetadata(
+  allowedTypes: AttachmentType[],
+): Record<string, AttachmentSchemaMetadata> {
+  return {
+    [KONSIER_SCHEMA_KEY]: {
+      kind: "attachment",
+      allowed_types: allowedTypes,
+    },
+  };
+}
+
+function buildFileAttachmentSchema<TType extends "image" | "video" | "audio" | "file">(
+  type: TType,
+) {
+  return z
+    .object({
+      id: z.string().min(1),
+      type: z.literal(type),
+      name: z.string().optional(),
+      caption: z.string().optional(),
+      mimeType: z.string().optional(),
+      url: z.string().min(1),
+      filename: z.string().optional(),
+      originalName: z.string().optional(),
+    })
+    .meta(attachmentSchemaMetadata([type]));
+}
+
+function buildLocationAttachmentSchema() {
+  return z
+    .object({
+      id: z.string().min(1),
+      type: z.literal("location"),
+      name: z.string().optional(),
+      caption: z.string().optional(),
+      mimeType: z.string().optional(),
+      latitude: z.number().finite(),
+      longitude: z.number().finite(),
+      address: z.string().optional(),
+    })
+    .meta(attachmentSchemaMetadata(["location"]));
+}
+
+const imageAttachmentSchema = buildFileAttachmentSchema("image");
+const videoAttachmentSchema = buildFileAttachmentSchema("video");
+const audioAttachmentSchema = buildFileAttachmentSchema("audio");
+const fileAttachmentSchema = buildFileAttachmentSchema("file");
+const locationAttachmentSchema = buildLocationAttachmentSchema();
+
+export const attachment = {
+  image: () => imageAttachmentSchema as typeof imageAttachmentSchema,
+  video: () => videoAttachmentSchema as typeof videoAttachmentSchema,
+  audio: () => audioAttachmentSchema as typeof audioAttachmentSchema,
+  file: () => fileAttachmentSchema as typeof fileAttachmentSchema,
+  location: () => locationAttachmentSchema as typeof locationAttachmentSchema,
+};
+
+export type AttachmentSchema =
+  | typeof imageAttachmentSchema
+  | typeof videoAttachmentSchema
+  | typeof audioAttachmentSchema
+  | typeof fileAttachmentSchema
+  | typeof locationAttachmentSchema;
+
+export type AttachmentSchemaValue =
+  | ImageAttachment
+  | VideoAttachment
+  | AudioAttachment
+  | FileAttachment
+  | LocationAttachment;
+
+export function normalizeToolKey(name: string): string {
+  const normalized = name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .replace(/_+/g, "_");
+
+  if (!normalized || !TOOL_KEY_REGEX.test(normalized)) {
+    throw new KonsierError({
+      code: "INVALID_TOOL_NAME",
+      message: `Tool name "${name}" could not be normalized into a valid tool identifier.`,
+      statusCode: 400,
+    });
+  }
+
+  return normalized;
 }
 
 function parseToolInput<TInput>(
@@ -138,16 +241,24 @@ function deriveInputSchema<TInput>(
   schema: ToolInputSchema<TInput>,
 ): Record<string, unknown> {
   if (schema && typeof schema.toJSONSchema === "function") {
-    return schema.toJSONSchema();
+    const converted = replaceAttachmentSchemaNodes(schema.toJSONSchema());
+    if (converted && typeof converted === "object" && !Array.isArray(converted)) {
+      return converted as Record<string, unknown>;
+    }
   }
 
   if (schema && typeof schema.toJsonSchema === "function") {
-    return schema.toJsonSchema();
+    const converted = replaceAttachmentSchemaNodes(schema.toJsonSchema());
+    if (converted && typeof converted === "object" && !Array.isArray(converted)) {
+      return converted as Record<string, unknown>;
+    }
   }
 
   if (isZodSchema(schema)) {
     try {
-      const converted = toJSONSchema(schema as never);
+      const converted = replaceAttachmentSchemaNodes(
+        toJSONSchema(schema as never),
+      );
 
       if (converted && typeof converted === "object" && !Array.isArray(converted)) {
         return converted as Record<string, unknown>;
@@ -160,6 +271,81 @@ function deriveInputSchema<TInput>(
   return {
     type: "object",
     additionalProperties: true,
+  };
+}
+
+function replaceAttachmentSchemaNodes(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => replaceAttachmentSchemaNodes(item));
+  }
+
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+
+  const record = value as Record<string, unknown>;
+  const meta = parseAttachmentSchemaMetadata(record[KONSIER_SCHEMA_KEY]);
+  if (meta) {
+    return buildAttachmentRefSchema(record, meta);
+  }
+
+  const next: Record<string, unknown> = {};
+  for (const [key, child] of Object.entries(record)) {
+    next[key] = replaceAttachmentSchemaNodes(child);
+  }
+  return next;
+}
+
+function parseAttachmentSchemaMetadata(
+  value: unknown,
+): AttachmentSchemaMetadata | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  if (record.kind !== "attachment" || !Array.isArray(record.allowed_types)) {
+    return null;
+  }
+
+  const allowedTypes = record.allowed_types.filter(
+    (entry): entry is AttachmentType =>
+      entry === "image" ||
+      entry === "video" ||
+      entry === "audio" ||
+      entry === "file" ||
+      entry === "location",
+  );
+
+  if (allowedTypes.length === 0) {
+    return null;
+  }
+
+  return {
+    kind: "attachment",
+    allowed_types: allowedTypes,
+  };
+}
+
+function buildAttachmentRefSchema(
+  schema: Record<string, unknown>,
+  meta: AttachmentSchemaMetadata,
+): Record<string, unknown> {
+  const declaredDescription =
+    typeof schema.description === "string" ? schema.description.trim() : "";
+  const allowedTypesLabel =
+    meta.allowed_types.length === 1
+      ? meta.allowed_types[0]
+      : meta.allowed_types.join(" or ");
+  const helperDescription = `Pass an attachment reference in att:... format for a ${allowedTypesLabel} from the conversation.`;
+
+  return {
+    type: "string",
+    pattern: ATTACHMENT_REF_PATTERN,
+    description: declaredDescription
+      ? `${declaredDescription} ${helperDescription}`
+      : helperDescription,
+    [KONSIER_SCHEMA_KEY]: meta,
   };
 }
 

@@ -42,7 +42,7 @@ import { z } from "zod";
 
 // 1. Define tools
 const getMenu = Konsier.tool({
-  name: "get_menu",
+  name: "Get Menu",
   description: "Returns the restaurant menu",
   input: z.object({
     category: z.string().optional(),
@@ -107,7 +107,7 @@ import { Konsier } from "konsier";
 import { z } from "zod";
 
 const createOrder = Konsier.tool({
-  name: "create_order",
+  name: "Create Order",
   description: "Places a new order",
   input: z.object({
     items: z.array(z.object({
@@ -141,12 +141,34 @@ handler: async (input, ctx) => {
   ctx.account     // { id, name, metadata } or null
   ctx.channel     // "telegram" | "slack" | "whatsapp" | ...
   ctx.conversation // { id, startedAt, messageCount }
-  ctx.message     // { text?, html?, attachments? } — the triggering message
-  ctx.send(msg)   // send a follow-up message to the conversation
+  ctx.messages    // pending user messages for this turn, oldest to newest
+  ctx.attach(...) // queue attachments for the assistant response
+  return ctx.end({ text: "Done" }) // end the tool flow with a final response
 }
 ```
 
 `ctx.user` always has an `id`. The remaining fields (`externalId`, `metadata`, `displayName`) are populated when available — for example, after you link a user (see [User and account linking](#user-and-account-linking)).
+
+If a tool depends on an uploaded asset, declare it explicitly in the tool input rather than reading `ctx.messages.at(-1)?.attachments`. That keeps multi-turn flows deterministic.
+
+```ts
+const addExpense = Konsier.tool({
+  name: "Add Expense",
+  description: "Create an expense record from an uploaded receipt.",
+  input: z.object({
+    title: z.string().min(1),
+    receipt: Konsier.attachment.file()
+      .optional()
+      .describe("Uploaded receipt document from the conversation"),
+  }),
+  handler: async (input) => {
+    return {
+      title: input.title,
+      hasReceipt: Boolean(input.receipt),
+    };
+  },
+});
+```
 
 ## Configuring agents
 
@@ -184,7 +206,7 @@ Internal tools are available only in the Konsier dashboard (not to end users via
 
 ```ts
 const salesSnapshot = Konsier.tool({
-  name: "sales_snapshot",
+  name: "Sales Snapshot",
   description: "Returns today's sales summary",
   input: z.object({}),
   handler: async (_input, ctx) => {
@@ -343,22 +365,6 @@ await konsier.sendMessage({
   userId: "konsier_user_id",
   text: "Your order has shipped!",
 });
-
-await konsier.sendMessage({
-  conversationId: "conv_123",
-  html: "<b>Update:</b> Your table is ready.",
-  attachments: [{ type: "image", url: "https://..." }],
-});
-```
-
-Inside tool handlers, use `ctx.send()` for the same purpose:
-
-```ts
-handler: async (input, ctx) => {
-  await ctx.send({ text: "Processing your order..." });
-  const order = await processOrder(input);
-  return { orderId: order.id };
-},
 ```
 
 ## Express integration
@@ -566,7 +572,7 @@ createServer(async (req, res) => {
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `name` | `string` | Yes | Alphanumeric, underscores, and hyphens only. |
+| `name` | `string` | Yes | Human-readable tool name. Konsier normalizes it into a callable id. |
 | `description` | `string` | Yes | What the tool does (shown to the LLM). |
 | `input` | `ZodSchema` | Yes | Zod schema defining the tool's input. |
 | `handler` | `(input, ctx) => object` | Yes | Async or sync function returning a JSON object. |
@@ -582,8 +588,9 @@ Passed as the second argument to every tool handler:
 | `channel` | `Channel` | `"telegram" \| "slack" \| "discord" \| "whatsapp" \| "email" \| "sms" \| "konsier"` |
 | `agent` | `string` | The agent ref handling this call (or `"internal"`). |
 | `conversation` | `Conversation` | `{ id, startedAt, messageCount }` |
-| `message` | `ToolMessage` | `{ text?, html?, attachments? }` — the user's triggering message. |
-| `send` | `(msg) => Promise<void>` | Send a follow-up message to the conversation. |
+| `messages` | `ToolMessage[]` | Pending user messages for the current turn, oldest to newest. |
+| `attach` | `(input) => void` | Queue attachments to be delivered with the assistant response. |
+| `end` | `(message?) => EndSignal` | Return `ctx.end(...)` to finish with a terminal text/attachment response. |
 
 ### `PageContext`
 

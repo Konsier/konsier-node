@@ -121,10 +121,13 @@ function createResponseRecorder(): HttpResponseLike & {
       return this;
     },
     toResponse() {
-      return new Response(this.body, {
+      return new Response(
+        this.body as ConstructorParameters<typeof Response>[0],
+        {
         status: this.statusCode,
         headers: this.headers,
-      });
+        },
+      );
     },
   };
 }

@@ -5,6 +5,8 @@
   <div class="task-body">
     <div class="task-title">{{title}}</div>
     <div class="badge badge-{{priority}}">{{priority}}</div>
+    {{attachmentBadge}}
+    {{attachmentList}}
   </div>
   <form method="post" action="/tasks/{{encodedTaskId}}/delete" class="task-delete">
     <button type="submit" class="delete-btn" title="Delete">&times;</button>

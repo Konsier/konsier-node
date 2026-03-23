@@ -57,7 +57,7 @@ export async function resolveAgentRequest(
   return {
     systemPrompt: resolved.systemPrompt,
     tools: resolved.tools.map((tool) => ({
-      name: tool.name,
+      name: tool.key,
       description: tool.description,
       input: tool.inputSchema,
     })),

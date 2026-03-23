@@ -34,7 +34,11 @@ export default async function ProductPage({
     <main className="shell">
       <div className="detail-layout">
         <div className={`detail-image ${categoryClass(product.category)}`}>
-          {CATEGORY_ICONS[product.category] ?? "\uD83D\uDCE6"}
+          {product.imagePath ? (
+            <img src={product.imagePath} alt={product.name} />
+          ) : (
+            CATEGORY_ICONS[product.category] ?? "\uD83D\uDCE6"
+          )}
         </div>
 
         <div className="detail-info">
