@@ -107,11 +107,18 @@ const addTaskTool = Konsier.tool({
   },
 });
 
+const taskReferenceSchema = z
+  .string()
+  .min(1)
+  .describe(
+    "Prefer the exact task id such as task_4 from prior tool results. If an id is unavailable, pass a short distinctive task title or slug.",
+  );
+
 const getTaskDetailsTool = Konsier.tool({
   name: "Get Task Details",
   description:
     "Return details for one task and resend any attachments saved on it.",
-  input: z.object({ taskId: z.string().min(1) }),
+  input: z.object({ taskId: taskReferenceSchema }),
   handler: async (input, ctx) => {
     const task = getTask(input.taskId);
     if (!task) {
@@ -147,7 +154,7 @@ const getTaskDetailsTool = Konsier.tool({
 const completeTaskTool = Konsier.tool({
   name: "Complete Task",
   description: "Mark a task as completed.",
-  input: z.object({ taskId: z.string().min(1) }),
+  input: z.object({ taskId: taskReferenceSchema }),
   handler: async (input) => {
     const task = completeTask(input.taskId);
     if (!task) {
@@ -161,7 +168,7 @@ const completeTaskTool = Konsier.tool({
 const deleteTaskTool = Konsier.tool({
   name: "Delete Task",
   description: "Delete a task from the list.",
-  input: z.object({ taskId: z.string().min(1) }),
+  input: z.object({ taskId: taskReferenceSchema }),
   handler: async (input) => {
     const deleted = deleteTask(input.taskId);
     if (!deleted) {
@@ -181,7 +188,7 @@ export const konsier = new Konsier({
       name: "Todo Assistant",
       description: "Tracks a compact todo list for demos.",
       systemPrompt:
-        "You manage a lightweight task board. Use tools to read or modify tasks before responding. If a task should include an uploaded file, photo, audio clip, video, or location, pass it explicitly in the Add Task tool's attachment field instead of assuming the latest message attachment. When task details include attachments, let the user know they are included in the response.",
+        "You manage a lightweight task board. Use tools to read or modify tasks before responding. Always prefer exact task ids like task_4 from prior tool outputs when calling task detail, complete, or delete tools. If the user only gives a title, pass the clearest short task title or slug. If a task should include an uploaded file, photo, audio clip, video, or location, pass it explicitly in the Add Task tool's attachment field instead of assuming the latest message attachment. When task details include attachments, let the user know they are included in the response, but do not repeat internal attachment transcript markers.",
       tools: [
         listTasksTool,
         addTaskTool,

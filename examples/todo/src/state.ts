@@ -86,8 +86,54 @@ export function addTask(input: {
   return cloneTask(task);
 }
 
-export function getTask(id: string): Task | null {
-  const task = tasks.find((candidate) => candidate.id === id);
+function normalizeTaskReference(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function resolveTaskIndex(reference: string): number {
+  const exactIndex = tasks.findIndex((candidate) => candidate.id === reference);
+  if (exactIndex >= 0) {
+    return exactIndex;
+  }
+
+  const normalizedReference = normalizeTaskReference(reference);
+  if (!normalizedReference) {
+    return -1;
+  }
+
+  const exactTitleMatchIndex = tasks.findIndex(
+    (candidate) =>
+      normalizeTaskReference(candidate.title) === normalizedReference,
+  );
+  if (exactTitleMatchIndex >= 0) {
+    return exactTitleMatchIndex;
+  }
+
+  const partialMatches = tasks.reduce<number[]>((matches, candidate, index) => {
+    if (normalizeTaskReference(candidate.title).includes(normalizedReference)) {
+      matches.push(index);
+    }
+    return matches;
+  }, []);
+
+  if (partialMatches.length !== 1) {
+    return -1;
+  }
+
+  return partialMatches[0] ?? -1;
+}
+
+export function getTask(reference: string): Task | null {
+  const taskIndex = resolveTaskIndex(reference);
+  if (taskIndex < 0) {
+    return null;
+  }
+
+  const task = tasks[taskIndex];
   if (!task) {
     return null;
   }
@@ -105,8 +151,13 @@ export function toggleTask(id: string): Task | null {
   return cloneTask(task);
 }
 
-export function completeTask(id: string): Task | null {
-  const task = tasks.find((candidate) => candidate.id === id);
+export function completeTask(reference: string): Task | null {
+  const taskIndex = resolveTaskIndex(reference);
+  if (taskIndex < 0) {
+    return null;
+  }
+
+  const task = tasks[taskIndex];
   if (!task) {
     return null;
   }
@@ -115,8 +166,8 @@ export function completeTask(id: string): Task | null {
   return cloneTask(task);
 }
 
-export function deleteTask(id: string): boolean {
-  const index = tasks.findIndex((candidate) => candidate.id === id);
+export function deleteTask(reference: string): boolean {
+  const index = resolveTaskIndex(reference);
   if (index < 0) {
     return false;
   }
