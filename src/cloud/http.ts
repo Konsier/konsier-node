@@ -14,6 +14,14 @@ export interface CloudApiClientOptions {
   debug?: boolean;
 }
 
+type PublicErrorEnvelope = {
+  error?: {
+    code?: unknown;
+    message?: unknown;
+    action?: unknown;
+  };
+};
+
 export class CloudApiClient {
   private readonly apiKey: string;
   private readonly baseUrl: string;
@@ -89,15 +97,13 @@ export class CloudApiClient {
             continue;
           }
 
-          const message =
-            typeof parsed?.error === "string"
-              ? parsed.error
-              : raw || `Cloud request failed (${response.status})`;
-
+          const publicError = parsePublicErrorEnvelope(parsed);
+          const fallback = fallbackCloudError(response.status, raw, parsed);
           throw new KonsierError({
-            code: "CLOUD_REQUEST_FAILED",
-            message,
+            code: publicError?.code ?? fallback.code,
+            message: publicError?.message ?? fallback.message,
             statusCode: response.status,
+            action: publicError?.action ?? fallback.action,
             details: parsed,
           });
         }
@@ -137,8 +143,9 @@ export class CloudApiClient {
     throw (
       lastError ??
       new KonsierError({
-        code: "CLOUD_REQUEST_FAILED",
-        message: "Cloud request failed",
+        code: "cloud.request.failed",
+        message: "Konsier could not complete the request.",
+        action: "Try again. If the problem continues, contact support.",
       })
     );
   }
@@ -194,4 +201,97 @@ function stripUndefined(
     }
   }
   return out;
+}
+
+function parsePublicErrorEnvelope(
+  payload: Record<string, unknown> | null,
+): { code: string; message: string; action?: string } | null {
+  if (!payload) {
+    return null;
+  }
+
+  const envelope = payload as PublicErrorEnvelope;
+  if (
+    !envelope.error ||
+    typeof envelope.error !== "object" ||
+    Array.isArray(envelope.error)
+  ) {
+    return null;
+  }
+
+  const code =
+    typeof envelope.error.code === "string" ? envelope.error.code.trim() : "";
+  const message =
+    typeof envelope.error.message === "string"
+      ? envelope.error.message.trim()
+      : "";
+  const action =
+    typeof envelope.error.action === "string"
+      ? envelope.error.action.trim()
+      : "";
+
+  if (!code || !message) {
+    return null;
+  }
+
+  return {
+    code,
+    message,
+    ...(action ? { action } : {}),
+  };
+}
+
+function fallbackCloudError(
+  status: number,
+  raw: string,
+  parsed: Record<string, unknown> | null,
+): { code: string; message: string; action: string } {
+  const normalizedRaw = raw.trim();
+  const legacyMessage =
+    parsed && typeof parsed.error === "string" ? parsed.error.trim() : "";
+  if (status === 401) {
+    return {
+      code: "auth.request.unauthorized",
+      message: legacyMessage || "You are not authorized to perform this request.",
+      action: "Check the API key and try again.",
+    };
+  }
+
+  if (status === 400) {
+    return {
+      code: "validation.request.invalid",
+      message:
+        legacyMessage ||
+        normalizedRaw ||
+        "The request was rejected because it is invalid.",
+      action: "Check the request details and try again.",
+    };
+  }
+
+  if (status === 404) {
+    return {
+      code: "cloud.request.not_found",
+      message: legacyMessage || "The requested Konsier resource was not found.",
+      action: "Check the request target and try again.",
+    };
+  }
+
+  if (status >= 500) {
+    return {
+      code: "cloud.request.failed",
+      message:
+        legacyMessage ||
+        normalizedRaw ||
+        `Konsier could not complete the request because the server returned ${status}.`,
+      action: "Try again. If the problem continues, contact support.",
+    };
+  }
+
+  return {
+    code: "cloud.request.failed",
+    message:
+      legacyMessage ||
+      normalizedRaw || `Konsier could not complete the request (${status}).`,
+    action: "Check the request and try again.",
+  };
 }

@@ -87,6 +87,48 @@ Then in the [Konsier dashboard](https://konsier.com):
 4. Connect a channel (Telegram, Slack, etc.)
 5. Send a message — your tools execute automatically
 
+## Troubleshooting
+
+- Your `endpointUrl` must be publicly reachable by Konsier Cloud. A local `localhost` URL without a tunnel will not work.
+- If Konsier requests return `404`, that usually means your server was reached but the configured webhook path or app route is wrong. Verify the exact public `endpointUrl` you passed to the SDK and re-run `sync()`.
+- If channel replies suddenly fail after you rename or remove an agent ref in code, re-run `sync()` and then update the linked project agent in Konsier so it points at a still-registered ref.
+- `serveKonsier()` derives the incoming webhook path from `endpointUrl`, so the route mounted in your app must match that exact path.
+
+## Errors
+
+Konsier API and SDK errors use a consistent public shape:
+
+```json
+{
+  "error": {
+    "code": "project.endpoint.signature_invalid",
+    "message": "Konsier reached your app, but your app rejected the verification request.",
+    "action": "Check that your app's KONSIER_API_KEY matches this project's API key, then try again."
+  }
+}
+```
+
+Naming rule:
+
+- Error codes follow `<domain>.<subject>.<reason>`.
+- Examples: `project.endpoint.not_found`, `project.endpoint.signature_invalid`, `channel.telegram.bot_token_invalid`.
+
+When the SDK throws, it surfaces the same diagnosis:
+
+- `error.code`: canonical error code
+- `error.message`: plain-English diagnosis
+- `error.action`: the next step to take
+- `error.statusCode`: actual HTTP status
+
+Examples:
+
+- `project.endpoint.not_found`
+  Action: make sure your app exposes the configured `/konsier` route and that the project endpoint URL is correct.
+- `project.endpoint.signature_invalid`
+  Action: make sure your app's `KONSIER_API_KEY` matches the project's API key.
+- `channel.telegram.bot_token_invalid`
+  Action: get the correct bot token from `@BotFather` and try again.
+
 ## Concepts
 
 | Concept | What it is |

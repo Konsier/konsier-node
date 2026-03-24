@@ -1,12 +1,14 @@
 export class KonsierError extends Error {
   readonly code: string;
   readonly statusCode: number;
+  readonly action?: string;
   readonly details?: unknown;
 
   constructor(input: {
     code: string;
     message: string;
     statusCode?: number;
+    action?: string;
     details?: unknown;
     cause?: unknown;
   }) {
@@ -14,6 +16,7 @@ export class KonsierError extends Error {
     this.name = "KonsierError";
     this.code = input.code;
     this.statusCode = input.statusCode ?? 500;
+    this.action = input.action;
     this.details = input.details;
   }
 }
@@ -25,17 +28,19 @@ export function asKonsierError(error: unknown): KonsierError {
 
   if (error instanceof Error) {
     return new KonsierError({
-      code: "INTERNAL_ERROR",
+      code: "internal.system.unexpected",
       message: error.message,
       statusCode: 500,
+      action: "Try again. If the problem continues, contact support.",
       cause: error,
     });
   }
 
   return new KonsierError({
-    code: "INTERNAL_ERROR",
+    code: "internal.system.unexpected",
     message: "Unknown error",
     statusCode: 500,
+    action: "Try again. If the problem continues, contact support.",
     details: error,
   });
 }
