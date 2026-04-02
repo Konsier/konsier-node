@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## v0.3.1 - 2026-04-02
+
+### Features
+
+- add shared public API error contracts (67e7533)
+
+### Fixes
+
+- preserve optional handler error actions (5580b60)
+- surface cloud error actions and codes (838f2ac)
+
 ## v0.3.0 - 2026-03-23
 
 ### Features
