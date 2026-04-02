@@ -22,8 +22,12 @@ export class KonsierError extends Error {
     this.name = "KonsierError";
     this.code = input.code;
     this.statusCode = input.statusCode ?? 500;
-    this.action = input.action;
-    this.details = input.details;
+    if (typeof input.action !== "undefined") {
+      this.action = input.action;
+    }
+    if (typeof input.details !== "undefined") {
+      this.details = input.details;
+    }
   }
 }
 

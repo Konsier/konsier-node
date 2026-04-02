@@ -3,6 +3,7 @@ import {
   ERROR_CODES,
   ERROR_DEFAULTS,
   createApiErrorBody,
+  type ErrorCode,
 } from "../src/contracts";
 
 describe("contracts", () => {
@@ -76,9 +77,9 @@ describe("contracts", () => {
   });
 });
 
-function collectLeafValues(value: unknown): string[] {
+function collectLeafValues(value: unknown): ErrorCode[] {
   if (typeof value === "string") {
-    return [value];
+    return [value as ErrorCode];
   }
 
   if (!value || typeof value !== "object" || Array.isArray(value)) {

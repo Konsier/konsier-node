@@ -201,14 +201,21 @@ export function createHandler(dependencies: HandlerDependencies) {
         error: error instanceof Error ? error.message : "Unknown error",
       });
       const parsed = asKonsierError(error);
+      const errorBodyInput =
+        typeof parsed.action === "undefined"
+          ? {
+              code: parsed.code,
+              message: parsed.message,
+            }
+          : {
+              code: parsed.code,
+              message: parsed.message,
+              action: parsed.action,
+            };
       sendJson(
         res,
         parsed.statusCode,
-        createApiErrorBody({
-          code: parsed.code,
-          message: parsed.message,
-          action: parsed.action,
-        }),
+        createApiErrorBody(errorBodyInput),
       );
       if (next) {
         next(parsed);
