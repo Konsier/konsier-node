@@ -1,3 +1,4 @@
+import { ERROR_CODES, createPublicApiError } from "../contracts";
 import { KonsierError } from "../errors";
 import type {
   InboundAccount,
@@ -48,8 +49,10 @@ export async function resolveAgentRequest(
 
   if (!resolved.systemPrompt?.trim()) {
     throw new KonsierError({
-      code: "INVALID_AGENT_CONFIG",
-      message: `Agent \"${request.agent}\" has an empty systemPrompt.`,
+      ...createPublicApiError({
+        code: ERROR_CODES.agent.configuration.invalid,
+        message: `Agent "${request.agent}" has an empty systemPrompt.`,
+      }),
       statusCode: 500,
     });
   }

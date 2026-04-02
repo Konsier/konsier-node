@@ -1,3 +1,4 @@
+import { ERROR_CODES, createPublicApiError } from "../contracts";
 import { KonsierError } from "../errors";
 import type {
   AttachInput,
@@ -80,8 +81,10 @@ export async function sendMessage(
 ): Promise<void> {
   if (!input.userId && !input.conversationId) {
     throw new KonsierError({
-      code: "INVALID_SEND_INPUT",
-      message: "send() requires either userId or conversationId.",
+      ...createPublicApiError({
+        code: ERROR_CODES.validation.request.invalid,
+        message: "send() requires either userId or conversationId.",
+      }),
       statusCode: 400,
     });
   }
@@ -91,8 +94,10 @@ export async function sendMessage(
     (!input.attachments || input.attachments.length === 0)
   ) {
     throw new KonsierError({
-      code: "INVALID_SEND_INPUT",
-      message: "send() requires text or at least one attachment.",
+      ...createPublicApiError({
+        code: ERROR_CODES.validation.request.invalid,
+        message: "send() requires text or at least one attachment.",
+      }),
       statusCode: 400,
     });
   }

@@ -1,4 +1,5 @@
 import { inspect } from "node:util";
+import { ERROR_CODES, createPublicApiError } from "../contracts";
 import { KonsierError } from "../errors";
 import type {
   InboundAccount,
@@ -185,8 +186,10 @@ async function resolveTool(
     const tool = agent.tools.find((entry) => entry.key === request.tool.name);
     if (!tool) {
       throw new KonsierError({
-        code: "TOOL_NOT_FOUND",
-        message: `Tool "${request.tool.name}" is not registered for agent "${request.target.agent}".`,
+        ...createPublicApiError({
+          code: ERROR_CODES.tool.resource.not_found,
+          message: `Tool "${request.tool.name}" is not registered for agent "${request.target.agent}".`,
+        }),
         statusCode: 404,
       });
     }
@@ -197,8 +200,10 @@ async function resolveTool(
   const tool = (internal.tools ?? []).find((entry) => entry.key === request.tool.name);
   if (!tool) {
     throw new KonsierError({
-      code: "TOOL_NOT_FOUND",
-      message: `Internal tool "${request.tool.name}" is not registered.`,
+      ...createPublicApiError({
+        code: ERROR_CODES.tool.resource.not_found,
+        message: `Internal tool "${request.tool.name}" is not registered.`,
+      }),
       statusCode: 404,
     });
   }
@@ -213,8 +218,11 @@ function buildToolCallResponse(
   const end = asEndSignal(output);
   if (!end && (!output || typeof output !== "object" || Array.isArray(output))) {
     throw new KonsierError({
-      code: "INVALID_TOOL_OUTPUT",
-      message: "Tool handlers must return a JSON object or return ctx.end(...).",
+      ...createPublicApiError({
+        code: ERROR_CODES.tool.execution.invalid_output,
+        message:
+          "Tool handlers must return a JSON object or return ctx.end(...).",
+      }),
       statusCode: 500,
     });
   }

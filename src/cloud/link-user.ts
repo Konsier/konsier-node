@@ -1,3 +1,4 @@
+import { ERROR_CODES, createPublicApiError } from "../contracts";
 import { KonsierError } from "../errors";
 import type {
   AccountGetInput,
@@ -15,13 +16,15 @@ import type { CloudApiClient } from "./http";
 
 function requireNonEmptyString(
   value: string | undefined,
-  input: { code: string; message: string },
+  input: { code: typeof ERROR_CODES.validation.request.invalid; message: string },
 ): string {
   const normalized = value?.trim() ?? "";
   if (!normalized) {
+    const publicError = createPublicApiError(input);
     throw new KonsierError({
-      code: input.code,
-      message: input.message,
+      code: publicError.code,
+      message: publicError.message,
+      action: publicError.action,
       statusCode: 400,
     });
   }
@@ -31,8 +34,10 @@ function requireNonEmptyString(
 function normalizeSdkUser(raw: unknown): SdkUser {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
     throw new KonsierError({
-      code: "INVALID_CLOUD_RESPONSE",
-      message: "users.get() returned an invalid payload.",
+      ...createPublicApiError({
+        code: ERROR_CODES.client.response.invalid,
+        message: "users.get() returned an invalid payload.",
+      }),
       statusCode: 500,
       details: raw,
     });
@@ -42,8 +47,10 @@ function normalizeSdkUser(raw: unknown): SdkUser {
   const id = typeof record.id === "string" ? record.id.trim() : "";
   if (!id) {
     throw new KonsierError({
-      code: "INVALID_CLOUD_RESPONSE",
-      message: "users.get() returned an invalid payload.",
+      ...createPublicApiError({
+        code: ERROR_CODES.client.response.invalid,
+        message: "users.get() returned an invalid payload.",
+      }),
       statusCode: 500,
       details: raw,
     });
@@ -70,8 +77,10 @@ function normalizeSdkUser(raw: unknown): SdkUser {
 function normalizeSdkAccount(raw: unknown): SdkAccount {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
     throw new KonsierError({
-      code: "INVALID_CLOUD_RESPONSE",
-      message: "accounts API returned an invalid payload.",
+      ...createPublicApiError({
+        code: ERROR_CODES.client.response.invalid,
+        message: "accounts API returned an invalid payload.",
+      }),
       statusCode: 500,
       details: raw,
     });
@@ -82,8 +91,10 @@ function normalizeSdkAccount(raw: unknown): SdkAccount {
   const name = typeof record.name === "string" ? record.name.trim() : "";
   if (!id || !name) {
     throw new KonsierError({
-      code: "INVALID_CLOUD_RESPONSE",
-      message: "accounts API returned an invalid payload.",
+      ...createPublicApiError({
+        code: ERROR_CODES.client.response.invalid,
+        message: "accounts API returned an invalid payload.",
+      }),
       statusCode: 500,
       details: raw,
     });
@@ -150,7 +161,7 @@ export async function getUser(
   input: UserGetInput,
 ): Promise<SdkUser> {
   const userId = requireNonEmptyString(input.userId, {
-    code: "INVALID_USER_INPUT",
+    code: ERROR_CODES.validation.request.invalid,
     message: "users.get() requires userId.",
   });
   const payload = await client.get(`/users/${encodeURIComponent(userId)}`);
@@ -162,11 +173,11 @@ export async function linkUser(
   input: UserLinkInput,
 ): Promise<SdkUser> {
   const userId = requireNonEmptyString(input.userId, {
-    code: "INVALID_USER_INPUT",
+    code: ERROR_CODES.validation.request.invalid,
     message: "users.link() requires userId.",
   });
   const externalId = requireNonEmptyString(input.externalId, {
-    code: "INVALID_USER_INPUT",
+    code: ERROR_CODES.validation.request.invalid,
     message: "users.link() requires externalId.",
   });
   const payload = await client.post("/users/link", {
@@ -190,7 +201,7 @@ export async function getAccount(
   input: AccountGetInput,
 ): Promise<SdkAccount> {
   const accountId = requireNonEmptyString(input.accountId, {
-    code: "INVALID_ACCOUNT_INPUT",
+    code: ERROR_CODES.validation.request.invalid,
     message: "accounts.get() requires accountId.",
   });
   const payload = await client.get(`/accounts/${encodeURIComponent(accountId)}`);
@@ -202,11 +213,11 @@ export async function linkAccount(
   input: AccountLinkInput,
 ): Promise<SdkAccount> {
   const accountId = requireNonEmptyString(input.accountId, {
-    code: "INVALID_ACCOUNT_INPUT",
+    code: ERROR_CODES.validation.request.invalid,
     message: "accounts.link() requires accountId.",
   });
   const externalId = requireNonEmptyString(input.externalId, {
-    code: "INVALID_ACCOUNT_INPUT",
+    code: ERROR_CODES.validation.request.invalid,
     message: "accounts.link() requires externalId.",
   });
   const payload = await client.post("/accounts/link", {
@@ -222,7 +233,7 @@ export async function startConnection(
   input: ConnectionStartInput,
 ): Promise<ConnectionStartResult> {
   const redirect = requireNonEmptyString(input.redirect, {
-    code: "INVALID_CONNECTION_INPUT",
+    code: ERROR_CODES.validation.request.invalid,
     message: "connections.start() requires redirect.",
   });
   const payload = await client.post("/connections/start", {
@@ -234,8 +245,10 @@ export async function startConnection(
     typeof payload.expiresAt === "string" ? payload.expiresAt : "";
   if (!url || !expiresAt) {
     throw new KonsierError({
-      code: "INVALID_CLOUD_RESPONSE",
-      message: "connections.start() returned an invalid payload.",
+      ...createPublicApiError({
+        code: ERROR_CODES.client.response.invalid,
+        message: "connections.start() returned an invalid payload.",
+      }),
       statusCode: 500,
       details: payload,
     });
@@ -248,7 +261,7 @@ export async function completeConnection(
   input: ConnectionCompleteInput,
 ): Promise<ConnectionCompleteResult> {
   const token = requireNonEmptyString(input.token, {
-    code: "INVALID_CONNECTION_INPUT",
+    code: ERROR_CODES.validation.request.invalid,
     message: "connections.complete() requires token.",
   });
   const payload = await client.post("/connections/complete", {

@@ -4,6 +4,7 @@ import {
   HEADER_SIGNATURE,
   HEADER_TIMESTAMP,
 } from "../constants";
+import { ERROR_CODES, createApiErrorBody } from "../contracts";
 import { asKonsierError } from "../errors";
 import { getHeaderValue, verifyKonsierSignature } from "../protocol/signatures";
 import type { HttpRequestLike, HttpResponseLike, NextFunction } from "../types";
@@ -38,7 +39,14 @@ export function createHandler(dependencies: HandlerDependencies) {
     try {
       if ((req.method ?? "POST").toUpperCase() !== "POST") {
         debugLog(debug, "method rejected", { method: req.method ?? "POST" });
-        sendJson(res, 405, { error: "Method not allowed" });
+        sendJson(
+          res,
+          405,
+          createApiErrorBody({
+            code: ERROR_CODES.validation.request.invalid,
+            message: "Method not allowed.",
+          }),
+        );
         return;
       }
 
@@ -47,7 +55,14 @@ export function createHandler(dependencies: HandlerDependencies) {
 
       if (!signature || !timestamp) {
         debugLog(debug, "missing signature headers");
-        sendJson(res, 401, { error: "Missing signature headers" });
+        sendJson(
+          res,
+          401,
+          createApiErrorBody({
+            code: ERROR_CODES.auth.request.unauthorized,
+            message: "Missing signature headers.",
+          }),
+        );
         return;
       }
 
@@ -64,14 +79,28 @@ export function createHandler(dependencies: HandlerDependencies) {
         debugLog(debug, "signature verification failed", {
           reason: verified.reason,
         });
-        sendJson(res, 401, { error: verified.reason });
+        sendJson(
+          res,
+          401,
+          createApiErrorBody({
+            code: ERROR_CODES.auth.request.unauthorized,
+            message: verified.reason,
+          }),
+        );
         return;
       }
 
       const payload = parseBody(req.body, rawBody);
       if (!payload) {
         debugLog(debug, "invalid JSON body");
-        sendJson(res, 400, { error: "Invalid JSON request body" });
+        sendJson(
+          res,
+          400,
+          createApiErrorBody({
+            code: ERROR_CODES.validation.request.invalid,
+            message: "Invalid JSON request body.",
+          }),
+        );
         return;
       }
 
@@ -95,10 +124,14 @@ export function createHandler(dependencies: HandlerDependencies) {
       }
       if (payload.type === "tool_call") {
         debugLog(debug, "invalid tool_call payload");
-        sendJson(res, 400, {
-          error: "Invalid tool_call request",
-          code: "INVALID_TOOL_CALL_REQUEST",
-        });
+        sendJson(
+          res,
+          400,
+          createApiErrorBody({
+            code: ERROR_CODES.validation.request.invalid,
+            message: "Invalid tool_call request.",
+          }),
+        );
         return;
       }
 
@@ -116,10 +149,14 @@ export function createHandler(dependencies: HandlerDependencies) {
       }
       if (payload.type === "resolve_agent") {
         debugLog(debug, "invalid resolve_agent payload");
-        sendJson(res, 400, {
-          error: "Invalid resolve_agent request",
-          code: "INVALID_RESOLVE_AGENT_REQUEST",
-        });
+        sendJson(
+          res,
+          400,
+          createApiErrorBody({
+            code: ERROR_CODES.validation.request.invalid,
+            message: "Invalid resolve_agent request.",
+          }),
+        );
         return;
       }
 
@@ -139,24 +176,40 @@ export function createHandler(dependencies: HandlerDependencies) {
       }
       if (payload.type === "manifest") {
         debugLog(debug, "invalid manifest payload");
-        sendJson(res, 400, {
-          error: "Invalid manifest request",
-          code: "INVALID_MANIFEST_REQUEST",
-        });
+        sendJson(
+          res,
+          400,
+          createApiErrorBody({
+            code: ERROR_CODES.validation.request.invalid,
+            message: "Invalid manifest request.",
+          }),
+        );
         return;
       }
 
       debugLog(debug, "unknown request type", { type: payload.type });
-      sendJson(res, 400, { error: "Unknown request type" });
+      sendJson(
+        res,
+        400,
+        createApiErrorBody({
+          code: ERROR_CODES.validation.request.invalid,
+          message: "Unknown request type.",
+        }),
+      );
     } catch (error) {
       debugLog(debug, "handler error", {
         error: error instanceof Error ? error.message : "Unknown error",
       });
       const parsed = asKonsierError(error);
-      sendJson(res, parsed.statusCode, {
-        error: parsed.message,
-        code: parsed.code,
-      });
+      sendJson(
+        res,
+        parsed.statusCode,
+        createApiErrorBody({
+          code: parsed.code,
+          message: parsed.message,
+          action: parsed.action,
+        }),
+      );
       if (next) {
         next(parsed);
       }

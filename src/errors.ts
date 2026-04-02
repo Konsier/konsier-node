@@ -1,11 +1,17 @@
+import {
+  ERROR_CODES,
+  createPublicApiError,
+  type ErrorCode,
+} from "./contracts";
+
 export class KonsierError extends Error {
-  readonly code: string;
+  readonly code: ErrorCode;
   readonly statusCode: number;
   readonly action?: string;
   readonly details?: unknown;
 
   constructor(input: {
-    code: string;
+    code: ErrorCode;
     message: string;
     statusCode?: number;
     action?: string;
@@ -27,20 +33,28 @@ export function asKonsierError(error: unknown): KonsierError {
   }
 
   if (error instanceof Error) {
-    return new KonsierError({
-      code: "internal.system.unexpected",
+    const fallback = createPublicApiError({
+      code: ERROR_CODES.internal.system.unexpected,
       message: error.message,
+    });
+    return new KonsierError({
+      code: fallback.code,
+      message: fallback.message,
       statusCode: 500,
-      action: "Try again. If the problem continues, contact support.",
+      action: fallback.action,
       cause: error,
     });
   }
 
-  return new KonsierError({
-    code: "internal.system.unexpected",
+  const fallback = createPublicApiError({
+    code: ERROR_CODES.internal.system.unexpected,
     message: "Unknown error",
+  });
+  return new KonsierError({
+    code: fallback.code,
+    message: fallback.message,
     statusCode: 500,
-    action: "Try again. If the problem continues, contact support.",
+    action: fallback.action,
     details: error,
   });
 }

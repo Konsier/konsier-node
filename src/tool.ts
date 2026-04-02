@@ -1,5 +1,6 @@
 import { z, toJSONSchema } from "zod";
 
+import { ERROR_CODES, createPublicApiError } from "./contracts";
 import { KonsierError, toErrorMessage } from "./errors";
 import type {
   AttachmentType,
@@ -67,9 +68,14 @@ export function createTool<
 >(definition: ToolDefinition<TInput, TOutput>): Tool<TInput, TOutput> {
   const name = definition.name?.trim();
   if (!name) {
-    throw new KonsierError({
-      code: "INVALID_TOOL_NAME",
+    const publicError = createPublicApiError({
+      code: ERROR_CODES.tool.configuration.invalid,
       message: "Tool name is required.",
+    });
+    throw new KonsierError({
+      code: publicError.code,
+      message: publicError.message,
+      action: publicError.action,
       statusCode: 400,
     });
   }
@@ -78,17 +84,27 @@ export function createTool<
 
   const description = definition.description?.trim();
   if (!description) {
+    const publicError = createPublicApiError({
+      code: ERROR_CODES.tool.configuration.invalid,
+      message: `Tool "${name}" must include a description.`,
+    });
     throw new KonsierError({
-      code: "INVALID_TOOL_DESCRIPTION",
-      message: `Tool \"${name}\" must include a description.`,
+      code: publicError.code,
+      message: publicError.message,
+      action: publicError.action,
       statusCode: 400,
     });
   }
 
   if (typeof definition.handler !== "function") {
+    const publicError = createPublicApiError({
+      code: ERROR_CODES.tool.configuration.invalid,
+      message: `Tool "${name}" handler must be a function.`,
+    });
     throw new KonsierError({
-      code: "INVALID_TOOL_HANDLER",
-      message: `Tool \"${name}\" handler must be a function.`,
+      code: publicError.code,
+      message: publicError.message,
+      action: publicError.action,
       statusCode: 400,
     });
   }
@@ -187,9 +203,14 @@ export function normalizeToolKey(name: string): string {
     .replace(/_+/g, "_");
 
   if (!normalized || !TOOL_KEY_REGEX.test(normalized)) {
-    throw new KonsierError({
-      code: "INVALID_TOOL_NAME",
+    const publicError = createPublicApiError({
+      code: ERROR_CODES.tool.configuration.invalid,
       message: `Tool name "${name}" could not be normalized into a valid tool identifier.`,
+    });
+    throw new KonsierError({
+      code: publicError.code,
+      message: publicError.message,
+      action: publicError.action,
       statusCode: 400,
     });
   }
@@ -209,10 +230,12 @@ function parseToolInput<TInput>(
     }
 
     throw new KonsierError({
-      code: "INVALID_TOOL_INPUT",
-      message: `Tool \"${toolName}\" received invalid input: ${formatParseError(
-        parsed.error,
-      )}`,
+      ...createPublicApiError({
+        code: ERROR_CODES.validation.request.invalid,
+        message: `Tool "${toolName}" received invalid input: ${formatParseError(
+          parsed.error,
+        )}`,
+      }),
       statusCode: 400,
       details: parsed.error,
     });
@@ -223,10 +246,12 @@ function parseToolInput<TInput>(
       return schema.parse(input);
     } catch (error) {
       throw new KonsierError({
-        code: "INVALID_TOOL_INPUT",
-        message: `Tool \"${toolName}\" received invalid input: ${toErrorMessage(
-          error,
-        )}`,
+        ...createPublicApiError({
+          code: ERROR_CODES.validation.request.invalid,
+          message: `Tool "${toolName}" received invalid input: ${toErrorMessage(
+            error,
+          )}`,
+        }),
         statusCode: 400,
         details: error,
       });

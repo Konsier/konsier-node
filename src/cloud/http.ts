@@ -6,6 +6,12 @@ import {
   HEADER_AUTHORIZATION,
   HEADER_CONTENT_TYPE,
 } from "../constants";
+import {
+  ERROR_CODES,
+  createPublicApiError,
+  type ApiErrorBody,
+  type ErrorCode,
+} from "../contracts";
 import { KonsierError } from "../errors";
 
 export interface CloudApiClientOptions {
@@ -14,13 +20,7 @@ export interface CloudApiClientOptions {
   debug?: boolean;
 }
 
-type PublicErrorEnvelope = {
-  error?: {
-    code?: unknown;
-    message?: unknown;
-    action?: unknown;
-  };
-};
+type PublicErrorEnvelope = ApiErrorBody;
 
 export class CloudApiClient {
   private readonly apiKey: string;
@@ -133,6 +133,30 @@ export class CloudApiClient {
                 error instanceof Error ? error.message : "Unknown error",
             });
           }
+          if (error instanceof TypeError) {
+            const publicError = createPublicApiError({
+              code: ERROR_CODES.client.network.unreachable,
+            });
+            throw new KonsierError({
+              code: publicError.code,
+              message: publicError.message,
+              action: publicError.action,
+              statusCode: 503,
+              cause: error,
+            });
+          }
+          if (error instanceof Error && error.name === "AbortError") {
+            const publicError = createPublicApiError({
+              code: ERROR_CODES.client.network.timeout,
+            });
+            throw new KonsierError({
+              code: publicError.code,
+              message: publicError.message,
+              action: publicError.action,
+              statusCode: 504,
+              cause: error,
+            });
+          }
           throw error;
         }
       } finally {
@@ -142,11 +166,17 @@ export class CloudApiClient {
 
     throw (
       lastError ??
-      new KonsierError({
-        code: "cloud.request.failed",
-        message: "Konsier could not complete the request.",
-        action: "Try again. If the problem continues, contact support.",
-      })
+      (() => {
+        const publicError = createPublicApiError({
+          code: ERROR_CODES.internal.system.unexpected,
+          message: "Konsier could not complete the request.",
+        });
+        return new KonsierError({
+          code: publicError.code,
+          message: publicError.message,
+          action: publicError.action,
+        });
+      })()
     );
   }
 }
@@ -205,7 +235,7 @@ function stripUndefined(
 
 function parsePublicErrorEnvelope(
   payload: Record<string, unknown> | null,
-): { code: string; message: string; action?: string } | null {
+): { code: ErrorCode; message: string; action?: string } | null {
   if (!payload) {
     return null;
   }
@@ -235,7 +265,7 @@ function parsePublicErrorEnvelope(
   }
 
   return {
-    code,
+    code: code as ErrorCode,
     message,
     ...(action ? { action } : {}),
   };
@@ -245,53 +275,53 @@ function fallbackCloudError(
   status: number,
   raw: string,
   parsed: Record<string, unknown> | null,
-): { code: string; message: string; action: string } {
+): { code: ErrorCode; message: string; action: string } {
   const normalizedRaw = raw.trim();
   const legacyMessage =
     parsed && typeof parsed.error === "string" ? parsed.error.trim() : "";
   if (status === 401) {
-    return {
-      code: "auth.request.unauthorized",
+    return createPublicApiError({
+      code: ERROR_CODES.auth.request.unauthorized,
       message: legacyMessage || "You are not authorized to perform this request.",
       action: "Check the API key and try again.",
-    };
+    });
+  }
+
+  if (status === 403) {
+    return createPublicApiError({
+      code: ERROR_CODES.auth.request.forbidden,
+      message: legacyMessage || "You do not have permission to perform this request.",
+      action: "Check your permissions and try again.",
+    });
   }
 
   if (status === 400) {
-    return {
-      code: "validation.request.invalid",
+    return createPublicApiError({
+      code: ERROR_CODES.validation.request.invalid,
       message:
         legacyMessage ||
         normalizedRaw ||
         "The request was rejected because it is invalid.",
       action: "Check the request details and try again.",
-    };
-  }
-
-  if (status === 404) {
-    return {
-      code: "cloud.request.not_found",
-      message: legacyMessage || "The requested Konsier resource was not found.",
-      action: "Check the request target and try again.",
-    };
+    });
   }
 
   if (status >= 500) {
-    return {
-      code: "cloud.request.failed",
+    return createPublicApiError({
+      code: ERROR_CODES.internal.system.unexpected,
       message:
         legacyMessage ||
         normalizedRaw ||
         `Konsier could not complete the request because the server returned ${status}.`,
       action: "Try again. If the problem continues, contact support.",
-    };
+    });
   }
 
-  return {
-    code: "cloud.request.failed",
+  return createPublicApiError({
+    code: ERROR_CODES.client.response.invalid,
     message:
       legacyMessage ||
       normalizedRaw || `Konsier could not complete the request (${status}).`,
     action: "Check the request and try again.",
-  };
+  });
 }

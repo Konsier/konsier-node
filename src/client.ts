@@ -1,4 +1,5 @@
 import { DEFAULT_ALLOWED_CLOCK_SKEW_MS, ENV_CLOUD_BASE_URL } from "./constants";
+import { ERROR_CODES, createPublicApiError } from "./contracts";
 import {
   completeConnection,
   getAccount,
@@ -62,9 +63,14 @@ function normalizeEndpointUrl(raw: string | undefined): string | null {
 
   const normalized = raw.trim().replace(/\/+$/, "");
   if (!normalized) {
-    throw new KonsierError({
-      code: "INVALID_ENDPOINT_URL",
+    const publicError = createPublicApiError({
+      code: ERROR_CODES.client.configuration.endpoint_invalid,
       message: "Konsier endpointUrl must be a valid http(s) URL.",
+    });
+    throw new KonsierError({
+      code: publicError.code,
+      message: publicError.message,
+      action: publicError.action,
       statusCode: 400,
     });
   }
@@ -73,25 +79,40 @@ function normalizeEndpointUrl(raw: string | undefined): string | null {
   try {
     parsed = new URL(normalized);
   } catch {
-    throw new KonsierError({
-      code: "INVALID_ENDPOINT_URL",
+    const publicError = createPublicApiError({
+      code: ERROR_CODES.client.configuration.endpoint_invalid,
       message: "Konsier endpointUrl must be a valid http(s) URL.",
+    });
+    throw new KonsierError({
+      code: publicError.code,
+      message: publicError.message,
+      action: publicError.action,
       statusCode: 400,
     });
   }
 
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-    throw new KonsierError({
-      code: "INVALID_ENDPOINT_URL",
+    const publicError = createPublicApiError({
+      code: ERROR_CODES.client.configuration.endpoint_invalid,
       message: "Konsier endpointUrl must use http or https.",
+    });
+    throw new KonsierError({
+      code: publicError.code,
+      message: publicError.message,
+      action: publicError.action,
       statusCode: 400,
     });
   }
 
   if (parsed.search || parsed.hash) {
-    throw new KonsierError({
-      code: "INVALID_ENDPOINT_URL",
+    const publicError = createPublicApiError({
+      code: ERROR_CODES.client.configuration.endpoint_invalid,
       message: "Konsier endpointUrl must not include query or hash segments.",
+    });
+    throw new KonsierError({
+      code: publicError.code,
+      message: publicError.message,
+      action: publicError.action,
       statusCode: 400,
     });
   }
@@ -216,9 +237,13 @@ export class Konsier {
 
   constructor(options: KonsierOptions) {
     if (!options.apiKey?.trim()) {
+      const publicError = createPublicApiError({
+        code: ERROR_CODES.client.configuration.api_key_missing,
+      });
       throw new KonsierError({
-        code: "INVALID_API_KEY",
-        message: "Konsier requires a non-empty apiKey.",
+        code: publicError.code,
+        message: publicError.message,
+        action: publicError.action,
         statusCode: 400,
       });
     }
@@ -227,9 +252,13 @@ export class Konsier {
       (!options.agents || Object.keys(options.agents).length === 0) &&
       !options.internal
     ) {
+      const publicError = createPublicApiError({
+        code: ERROR_CODES.client.configuration.surface_missing,
+      });
       throw new KonsierError({
-        code: "INVALID_SURFACES",
-        message: "Konsier requires at least one agent or internal definition.",
+        code: publicError.code,
+        message: publicError.message,
+        action: publicError.action,
         statusCode: 400,
       });
     }
@@ -308,9 +337,14 @@ export class Konsier {
   }
   webhookPath(): string {
     if (!this.endpointUrl) {
-      throw new KonsierError({
-        code: "ENDPOINT_URL_REQUIRED",
+      const publicError = createPublicApiError({
+        code: ERROR_CODES.client.configuration.endpoint_invalid,
         message: "Konsier endpointUrl is required for webhook adapters.",
+      });
+      throw new KonsierError({
+        code: publicError.code,
+        message: publicError.message,
+        action: publicError.action,
         statusCode: 400,
       });
     }
@@ -416,8 +450,10 @@ export class Konsier {
     const entry = this.agents[agentKey];
     if (!entry) {
       throw new KonsierError({
-        code: "AGENT_NOT_FOUND",
-        message: `Agent "${agentKey}" is not registered in this SDK instance.`,
+        ...createPublicApiError({
+          code: ERROR_CODES.agent.resource.not_found,
+          message: `Agent "${agentKey}" is not registered in this SDK instance.`,
+        }),
         statusCode: 404,
       });
     }
@@ -439,8 +475,10 @@ export class Konsier {
 
     if (!resolved || typeof resolved !== "object" || Array.isArray(resolved)) {
       throw new KonsierError({
-        code: "INVALID_INTERNAL_CONFIG",
-        message: "internal must resolve to an object.",
+        ...createPublicApiError({
+          code: ERROR_CODES.client.configuration.invalid,
+          message: "internal must resolve to an object.",
+        }),
         statusCode: 500,
       });
     }
@@ -453,8 +491,10 @@ export class Konsier {
       const key = agentKey.trim();
       if (!key) {
         throw new KonsierError({
-          code: "INVALID_AGENT_KEY",
-          message: "Agent keys must be non-empty strings.",
+          ...createPublicApiError({
+            code: ERROR_CODES.client.configuration.invalid,
+            message: "Agent keys must be non-empty strings.",
+          }),
           statusCode: 400,
         });
       }
@@ -483,8 +523,10 @@ export class Konsier {
   ): void {
     if (!config?.systemPrompt?.trim()) {
       throw new KonsierError({
-        code: "INVALID_AGENT_CONFIG",
-        message: `Agent "${agentKey}" must include systemPrompt.`,
+        ...createPublicApiError({
+          code: ERROR_CODES.agent.configuration.invalid,
+          message: `Agent "${agentKey}" must include systemPrompt.`,
+        }),
         statusCode,
       });
     }
@@ -503,8 +545,10 @@ export class Konsier {
   }> {
     if (!Array.isArray(tools)) {
       throw new KonsierError({
-        code: "INVALID_TOOL",
-        message: `${owner} tools must be an array.`,
+        ...createPublicApiError({
+          code: ERROR_CODES.tool.configuration.invalid,
+          message: `${owner} tools must be an array.`,
+        }),
         statusCode,
       });
     }
@@ -514,8 +558,10 @@ export class Konsier {
       this.validateTool(tool, owner, statusCode);
       if (keys.has(tool.key)) {
         throw new KonsierError({
-          code: "DUPLICATE_TOOL_NAME",
-          message: `${owner} contains duplicate normalized tool key "${tool.key}" from "${tool.name}".`,
+          ...createPublicApiError({
+            code: ERROR_CODES.tool.configuration.invalid,
+            message: `${owner} contains duplicate normalized tool key "${tool.key}" from "${tool.name}".`,
+          }),
           statusCode,
         });
       }
@@ -535,8 +581,10 @@ export class Konsier {
   ): Array<{ name: string; path: string }> {
     if (!Array.isArray(pages)) {
       throw new KonsierError({
-        code: "INVALID_PAGE",
-        message: `${owner} pages must be an array.`,
+        ...createPublicApiError({
+          code: ERROR_CODES.client.configuration.invalid,
+          message: `${owner} pages must be an array.`,
+        }),
         statusCode,
       });
     }
@@ -550,16 +598,20 @@ export class Konsier {
 
       if (!name || !path) {
         throw new KonsierError({
-          code: "INVALID_PAGE",
-          message: `${owner} pages must include non-empty name and path values.`,
+          ...createPublicApiError({
+            code: ERROR_CODES.client.configuration.invalid,
+            message: `${owner} pages must include non-empty name and path values.`,
+          }),
           statusCode,
         });
       }
 
       if (names.has(name)) {
         throw new KonsierError({
-          code: "DUPLICATE_PAGE_NAME",
-          message: `${owner} contains duplicate page "${name}".`,
+          ...createPublicApiError({
+            code: ERROR_CODES.client.configuration.invalid,
+            message: `${owner} contains duplicate page "${name}".`,
+          }),
           statusCode,
         });
       }
@@ -576,24 +628,30 @@ export class Konsier {
   ): void {
     if (!tool || typeof tool !== "object") {
       throw new KonsierError({
-        code: "INVALID_TOOL",
-        message: `${owner} contains an invalid tool entry.`,
+        ...createPublicApiError({
+          code: ERROR_CODES.tool.configuration.invalid,
+          message: `${owner} contains an invalid tool entry.`,
+        }),
         statusCode,
       });
     }
 
     if (!tool.name || typeof tool.name !== "string") {
       throw new KonsierError({
-        code: "INVALID_TOOL",
-        message: `${owner} includes a tool with no name.`,
+        ...createPublicApiError({
+          code: ERROR_CODES.tool.configuration.invalid,
+          message: `${owner} includes a tool with no name.`,
+        }),
         statusCode,
       });
     }
 
     if (!tool.key || typeof tool.key !== "string") {
       throw new KonsierError({
-        code: "INVALID_TOOL",
-        message: `${owner} includes a tool with no normalized key.`,
+        ...createPublicApiError({
+          code: ERROR_CODES.tool.configuration.invalid,
+          message: `${owner} includes a tool with no normalized key.`,
+        }),
         statusCode,
       });
     }
@@ -603,8 +661,10 @@ export class Konsier {
       typeof tool.parseInput !== "function"
     ) {
       throw new KonsierError({
-        code: "INVALID_TOOL",
-        message: `Tool "${tool.name}" is not a valid Konsier tool. Use Konsier.tool({...}).`,
+        ...createPublicApiError({
+          code: ERROR_CODES.tool.configuration.invalid,
+          message: `Tool "${tool.name}" is not a valid Konsier tool. Use Konsier.tool({...}).`,
+        }),
         statusCode,
       });
     }

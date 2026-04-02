@@ -24,6 +24,9 @@
   "types": "dist/index.d.ts",
   "typesVersions": {
     "*": {
+      "contracts": [
+        "dist/contracts.d.ts"
+      ],
       "express": [
         "dist/adapters/express.d.ts"
       ],
@@ -43,6 +46,11 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "require": "./dist/index.cjs"
+    },
+    "./contracts": {
+      "types": "./dist/contracts.d.ts",
+      "import": "./dist/contracts.js",
+      "require": "./dist/contracts.cjs"
     },
     "./express": {
       "types": "./dist/adapters/express.d.ts",

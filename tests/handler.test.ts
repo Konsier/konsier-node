@@ -620,8 +620,11 @@ describe("webhookHandler", () => {
 
     expect(state.statusCode).toBe(500);
     expect(state.body).toEqual({
-      error: "Tool handlers must return a JSON object or return ctx.end(...).",
-      code: "INVALID_TOOL_OUTPUT",
+      error: {
+        code: "tool.execution.invalid_output",
+        message: "Tool handlers must return a JSON object or return ctx.end(...).",
+        action: "Update the tool handler to return a valid JSON object.",
+      },
     });
   });
 
@@ -816,6 +819,12 @@ describe("webhookHandler", () => {
     await handler(req as never, res as never);
 
     expect(state.statusCode).toBe(401);
-    expect(state.body).toEqual({ error: "SIGNATURE_MISMATCH" });
+    expect(state.body).toEqual({
+      error: {
+        code: "auth.request.unauthorized",
+        message: "SIGNATURE_MISMATCH",
+        action: "Check your credentials and try again.",
+      },
+    });
   });
 });
