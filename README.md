@@ -24,6 +24,12 @@ Telegram · Slack · WhatsApp · Discord · Email · SMS
 npm install konsier
 ```
 
+Or scaffold a new project with the built-in CLI:
+
+```bash
+npx konsier init
+```
+
 Install your framework separately when needed, for example `express`.
 
 The SDK includes [Zod 4](https://zod.dev) as a dependency. Import it from `"zod"` in your tool definitions:
@@ -31,6 +37,42 @@ The SDK includes [Zod 4](https://zod.dev) as a dependency. Import it from `"zod"
 ```ts
 import { z } from "zod";
 ```
+
+## CLI
+
+The package includes a CLI with two commands:
+
+```bash
+konsier init
+konsier sync
+```
+
+### `konsier init`
+
+Creates a ready-to-edit Konsier project scaffold. The CLI:
+
+- prompts for your framework
+- prompts for your public app URL
+- validates your Konsier API key
+- optionally connects a Telegram bot
+- writes skill files for supported coding agents
+- installs dependencies
+
+The generated project includes:
+
+- a valid placeholder `konsier` instance
+- framework-specific webhook wiring
+- `.env` and `.env.example`
+- a project-local `npm run sync` script
+
+### `konsier sync`
+
+Runs `konsier.sync()` for a scaffolded project by loading the generated exported `konsier` instance from:
+
+- `src/konsier.ts`, or
+- `app/konsier.ts`
+
+This is especially useful for Next.js projects, where there is no long-running server startup hook that can call `sync()` automatically.
 
 ## Quick start
 
