@@ -3,6 +3,7 @@ import { defineConfig } from "tsup";
 export default defineConfig({
   entry: {
     index: "src/index.ts",
+    "cli/index": "src/cli/index.ts",
     contracts: "src/contracts.ts",
     "adapters/express": "src/adapters/express.ts",
     "adapters/next": "src/adapters/next.ts",

@@ -19,6 +19,9 @@
   "author": "Konsier",
   "license": "Apache-2.0",
   "type": "module",
+  "bin": {
+    "konsier": "./dist/cli/index.js"
+  },
   "main": "dist/index.cjs",
   "module": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -88,6 +91,7 @@
     "typecheck": "tsc --noEmit && npm --prefix examples/todo run typecheck && npm --prefix examples/restaurant-manager run typecheck && npm --prefix examples/marketplace run typecheck"
   },
   "dependencies": {
+    "@clack/prompts": "^0.11.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {
