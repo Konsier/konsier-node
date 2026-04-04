@@ -1,6 +1,6 @@
 {
   "name": "konsier",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Konsier Node.js/TypeScript SDK",
   "repository": {
     "type": "git",

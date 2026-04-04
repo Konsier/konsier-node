@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## v0.3.2 - 2026-04-04
+
+### Features
+
+- add CLI project init and sync commands (6c7d874)
+
+### Fixes
+
+- correct CLI template type imports (322a935)
+
+### Documentation
+
+- add CLI usage and scaffold instructions (b2f5b1f)
+
 ## v0.3.1 - 2026-04-02
 
 ### Features
