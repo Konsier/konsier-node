@@ -1,4 +1,4 @@
-import type { Framework } from "../types";
+import type { Framework } from "../../types";
 
 export function frameworkFiles(framework: Framework): Record<string, string> {
   if (framework === "express") {

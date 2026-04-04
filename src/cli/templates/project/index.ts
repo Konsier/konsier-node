@@ -4,7 +4,7 @@ import {
   devDependencies,
   runtimeDependencies,
 } from "../database";
-import type { DatabaseOption, Framework } from "../types";
+import type { DatabaseOption, Framework } from "../../types";
 
 export function packageJsonTemplate(input: {
   projectName: string;

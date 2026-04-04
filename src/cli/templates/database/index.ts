@@ -1,4 +1,4 @@
-import type { DatabaseOption, Framework } from "../types";
+import type { DatabaseOption, Framework } from "../../types";
 
 export function databaseEnv(database: DatabaseOption): string[] {
   if (database === "supabase") {
