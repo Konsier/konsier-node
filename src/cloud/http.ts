@@ -48,8 +48,12 @@ export class CloudApiClient {
     return this.request("POST", path, body);
   }
 
-  private async request(
-    method: "GET" | "POST",
+  async delete(path: string): Promise<Record<string, unknown>> {
+    return this.request("DELETE", path);
+  }
+
+  async request(
+    method: "GET" | "POST" | "DELETE",
     path: string,
     body?: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {

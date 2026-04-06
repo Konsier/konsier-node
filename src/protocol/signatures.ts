@@ -34,7 +34,7 @@ export interface PageSessionTokenPayload {
   account: PageTokenAccount;
   user: PageTokenUser;
   theme: PageTheme;
-  exp: number;
+  exp?: number;
 }
 
 export function getHeaderValue(
@@ -162,7 +162,7 @@ export function createPageSessionToken(input: {
     name?: string | null;
   } | null;
   theme?: PageTheme;
-  exp: number;
+  exp?: number;
 }): string {
   return createSignedPageToken(input.apiKey, {
     type: "session",
@@ -170,7 +170,7 @@ export function createPageSessionToken(input: {
     account: normalizePageTokenAccount(input.account),
     user: normalizePageTokenUser(input.user),
     theme: normalizePageTheme(input.theme),
-    exp: input.exp,
+    ...(typeof input.exp === "number" ? { exp: input.exp } : {}),
   });
 }
 
@@ -213,10 +213,17 @@ export function verifyPageToken<T extends PageLaunchTokenPayload | PageSessionTo
     if (!parsed || typeof parsed !== "object") {
       return { ok: false, reason: "INVALID_TOKEN_PAYLOAD" };
     }
-    if (
-      typeof parsed.exp !== "number" ||
-      !Number.isFinite(parsed.exp) ||
-      parsed.exp <= (input.nowMs ?? Date.now())
+    if (parsed.type === "launch") {
+      if (
+        typeof parsed.exp !== "number" ||
+        !Number.isFinite(parsed.exp) ||
+        parsed.exp <= (input.nowMs ?? Date.now())
+      ) {
+        return { ok: false, reason: "TOKEN_EXPIRED" };
+      }
+    } else if (
+      typeof parsed.exp === "number" &&
+      (!Number.isFinite(parsed.exp) || parsed.exp <= (input.nowMs ?? Date.now()))
     ) {
       return { ok: false, reason: "TOKEN_EXPIRED" };
     }

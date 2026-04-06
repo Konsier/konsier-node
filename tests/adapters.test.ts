@@ -165,7 +165,16 @@ describe("framework adapters", () => {
     expect(response.status).toBe(200);
     const payload = await response.json();
     expect(payload).toMatchObject({
-      agents: [{ ref: "customer" }],
+      agents: {
+        customer: {
+          name: "customer",
+          description: null,
+          events: [],
+        },
+      },
+      project: {
+        events: [],
+      },
     });
   });
 
@@ -254,5 +263,89 @@ describe("framework adapters", () => {
         body: { endpoint_url: "https://example.com/konsier" },
       },
     ]);
+  });
+
+  it("serializes nested manifest handlers, telegram config, and resolver output", async () => {
+    const sdk = new Konsier({
+      apiKey: "k_test_123",
+      endpointUrl: "https://example.com/konsier",
+      events: {
+        beforeAccountConnect: () => {},
+        onAccountConnected: () => {},
+      },
+      agents: {
+        customer: ({ account }) => ({
+          name: account?.name ?? "customer",
+          description: "Resolver agent",
+          systemPrompt: "Support",
+          tools: [],
+          events: {
+            beforeConversationCreated: () => {},
+            onMessageReceived: () => {},
+          },
+          telegram: {
+            slashCommands: [
+              Konsier.telegram.slashCommand({
+                command: "start",
+                description: "Start",
+                handler: async () => ({ text: "ok" }),
+              }),
+            ],
+            events: {},
+          },
+        }),
+      },
+      internal: ({ account }) => ({
+        pages: [
+          {
+            name: account?.name ?? "Orders",
+            path: "/pages/orders",
+          },
+        ],
+      }),
+    });
+    const route = createKonsierRoute(sdk);
+    const response = await route(
+      createSignedFetchRequest("k_test_123", {
+        type: "manifest",
+        account: {
+          id: "acct_1",
+          name: "Acme",
+          metadata: { region: "us" },
+        },
+      }),
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload).toMatchObject({
+      project: {
+        events: ["beforeAccountConnect", "onAccountConnected"],
+      },
+      agents: {
+        customer: {
+          name: "Acme",
+          description: "Resolver agent",
+          events: ["beforeConversationCreated", "onMessageReceived"],
+          telegram: {
+            slashCommands: [
+              {
+                command: "start",
+                description: "Start",
+              },
+            ],
+            events: [],
+          },
+        },
+      },
+      internal: {
+        pages: [
+          {
+            name: "Acme",
+            path: "/pages/orders",
+          },
+        ],
+      },
+    });
   });
 });

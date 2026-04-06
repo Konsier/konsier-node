@@ -10,10 +10,20 @@ import {
   startConnection,
 } from "./cloud/link-user";
 import { CloudApiClient, resolveCloudBaseUrl } from "./cloud/http";
-import { sendMessage } from "./cloud/send";
+import {
+  clearConversation,
+  deleteConversation,
+  getConversation,
+  listConversationMessages,
+  listConversations,
+  resumeConversation,
+  sendConversationMessage,
+  takeOverConversation,
+} from "./cloud/conversations";
 import { KonsierError } from "./errors";
 import { createHandler } from "./handler";
 import { resolvePageRequest } from "./page/verify";
+import { notify } from "./notify";
 import { attachment, createTool, type Tool } from "./tool";
 import type {
   Account,
@@ -22,6 +32,8 @@ import type {
   AgentEntry,
   AgentManifestEntry,
   AccountLinkInput,
+  AgentEventHandlers,
+  AgentTelegramConfig,
   ConnectionCompleteInput,
   ConnectionCompleteResult,
   ConnectionStartInput,
@@ -30,11 +42,15 @@ import type {
   InternalEntry,
   JsonObject,
   KonsierOptions,
+  ConversationHandle,
+  ConversationListInput,
   ManifestContext,
+  NotificationInput,
   PageDefinition,
-  SendInput,
+  ProjectEventHandlers,
   SdkAccount,
   SdkUser,
+  TelegramSlashCommandDefinition,
   UserGetInput,
   UserLinkInput,
   PageRequestInput,
@@ -211,6 +227,9 @@ export function createJsonBodyMiddleware(rawBodyProperty: string) {
 export class Konsier {
   static tool = createTool;
   static attachment = attachment;
+  static telegram = {
+    slashCommand: createTelegramSlashCommand,
+  };
   readonly users: {
     get: (input: UserGetInput) => Promise<SdkUser>;
     link: (input: UserLinkInput) => Promise<SdkUser>;
@@ -226,10 +245,15 @@ export class Konsier {
       input: ConnectionCompleteInput,
     ) => Promise<ConnectionCompleteResult>;
   };
+  readonly conversations: {
+    list: (input?: ConversationListInput) => Promise<ConversationHandle[]>;
+  };
+  readonly notify: (input: NotificationInput) => Promise<Record<string, unknown>>;
 
   private readonly apiKey: string;
   private readonly agents: Record<string, AgentEntry>;
   private readonly internal: InternalEntry | null;
+  private readonly projectEvents: ProjectEventHandlers;
   private readonly cloudClient: CloudApiClient;
   private readonly allowedClockSkewMs: number;
   private readonly endpointUrl: string | null;
@@ -250,7 +274,8 @@ export class Konsier {
 
     if (
       (!options.agents || Object.keys(options.agents).length === 0) &&
-      !options.internal
+      !options.internal &&
+      !hasProjectEvents(options.events ?? {})
     ) {
       const publicError = createPublicApiError({
         code: ERROR_CODES.client.configuration.surface_missing,
@@ -266,6 +291,7 @@ export class Konsier {
     this.apiKey = options.apiKey;
     this.agents = options.agents ?? {};
     this.internal = options.internal ?? null;
+    this.projectEvents = options.events ?? {};
     this.allowedClockSkewMs = DEFAULT_ALLOWED_CLOCK_SKEW_MS;
     this.endpointUrl = normalizeEndpointUrl(options.endpointUrl);
     this.debug = Boolean(options.debug);
@@ -305,9 +331,23 @@ export class Konsier {
         return completeConnection(this.cloudClient, input);
       },
     };
+    this.conversations = {
+      list: async (input = {}) => {
+        const result = await listConversations(this.cloudClient, input);
+        return result.conversations.map((conversation) =>
+          this.createConversationHandle(conversation.id),
+        );
+      },
+    };
+    this.notify = async (input) => {
+      return notify(this.cloudClient, input);
+    };
 
     this.validateAgentRegistry();
     this.validateInternalRegistry();
+    this.validateTelegramRegistry();
+    this.validateProjectEvents();
+    this.validateAgentEvents();
 
     if (shouldDebugLog(this.debug)) {
       console.log("[konsier] initialized", {
@@ -322,6 +362,11 @@ export class Konsier {
         internalTools: this.internal && typeof this.internal !== "function"
           ? (this.internal.tools ?? []).length
           : null,
+        telegramSlashCommands: Object.values(this.agents).reduce((count, entry) => {
+          if (typeof entry === "function") return count;
+          return count + (entry.telegram?.slashCommands?.length ?? 0);
+        }, 0),
+        events: countProjectEvents(this.projectEvents),
       });
     }
   }
@@ -368,14 +413,37 @@ export class Konsier {
         resolveAgentConfig: (agent, account) =>
           this.resolveAgentConfig(agent, account),
       },
+      handleSlashCommand: {
+        resolveSlashCommand: (agent, command) =>
+          this.resolveTelegramSlashCommand(agent, command),
+      },
+      handleEventDispatch: {
+        resolveEventHandler: (target, name, phase) =>
+          this.resolveEventHandler(target, name, phase),
+      },
       handleManifest: {
         listManifest: (account) => this.listManifest({ account }),
       },
     });
   }
 
-  async sendMessage(input: SendInput): Promise<void> {
-    await sendMessage(this.cloudClient, input);
+  private createConversationHandle(
+    conversationId: string | number,
+  ): ConversationHandle {
+    return {
+      get: async () => getConversation(this.cloudClient, conversationId),
+      messages: {
+        list: async (input = {}) =>
+          listConversationMessages(this.cloudClient, conversationId, input),
+      },
+      sendMessage: async (input) =>
+        sendConversationMessage(this.cloudClient, conversationId, input),
+      clear: async () => clearConversation(this.cloudClient, conversationId),
+      delete: async () => deleteConversation(this.cloudClient, conversationId),
+      takeover: async () =>
+        takeOverConversation(this.cloudClient, conversationId),
+      resume: async () => resumeConversation(this.cloudClient, conversationId),
+    };
   }
 
   async sync(): Promise<void> {
@@ -405,7 +473,21 @@ export class Konsier {
   private async listManifest(
     context: ManifestContext,
   ): Promise<{
-    agents: AgentManifestEntry[];
+    project: {
+      events: string[];
+    };
+    agents: Record<string, {
+      name: string;
+      description: string | null;
+      events: string[];
+      telegram?: {
+        slashCommands: Array<{
+          command: string;
+          description: string;
+        }>;
+        events: string[];
+      };
+    }>;
     internal: {
       tools: Array<{
         name: string;
@@ -415,7 +497,7 @@ export class Konsier {
       pages: Array<{ name: string; path: string }>;
     };
   }> {
-    const agents = await Promise.all(
+    const agentsList = await Promise.all(
       Object.keys(this.agents).map(async (ref) => {
         const resolved = await this.resolveAgentEntry(ref, context.account);
         this.assertValidAgentConfig(resolved, ref, 500);
@@ -429,13 +511,45 @@ export class Konsier {
             typeof resolved.description === "string" && resolved.description.trim()
               ? resolved.description.trim()
               : null,
+          events: listRegisteredKeys(resolved.events ?? {}),
+          telegram:
+            resolved.telegram && (resolved.telegram.slashCommands?.length ?? 0) > 0
+              ? {
+                  slashCommands: (resolved.telegram.slashCommands ?? []).map(
+                    (entry) => ({
+                      command: entry.command,
+                      description: entry.description,
+                    }),
+                  ),
+                  events: listRegisteredKeys(resolved.telegram.events ?? {}),
+                }
+              : listRegisteredKeys(resolved.telegram?.events ?? {}).length > 0
+                ? {
+                    slashCommands: [],
+                    events: listRegisteredKeys(resolved.telegram?.events ?? {}),
+                  }
+                : undefined,
         };
       }),
+    );
+    const agents = Object.fromEntries(
+      agentsList.map((agent) => [
+        agent.ref,
+        {
+          name: agent.name,
+          description: agent.description,
+          events: agent.events,
+          ...(agent.telegram ? { telegram: agent.telegram } : {}),
+        },
+      ]),
     );
 
     const internal = await this.resolveInternalEntry(context);
     return {
       agents,
+      project: {
+        events: listRegisteredKeys(this.projectEvents),
+      },
       internal: {
         tools: this.manifestTools(internal.tools ?? [], "internal", 500),
         pages: this.pageDefinitions(internal.pages ?? [], "internal", 500),
@@ -514,6 +628,57 @@ export class Konsier {
 
     this.manifestTools(this.internal.tools ?? [], "internal", 400);
     this.pageDefinitions(this.internal.pages ?? [], "internal", 400);
+  }
+
+  private validateTelegramRegistry(): void {
+    const seen = new Set<string>();
+    for (const [agentKey, entry] of Object.entries(this.agents)) {
+      if (typeof entry === "function") {
+        continue;
+      }
+      const commands = entry.telegram?.slashCommands ?? [];
+      for (const commandEntry of commands) {
+        const command = commandEntry?.command?.trim().toLowerCase() ?? "";
+        const description = commandEntry?.description?.trim() ?? "";
+        if (!command || !description || typeof commandEntry?.handler !== "function") {
+          throw new KonsierError({
+            ...createPublicApiError({
+              code: ERROR_CODES.client.configuration.invalid,
+              message:
+                `agents.${agentKey}.telegram.slashCommands entries must include command, description, and handler.`,
+            }),
+            statusCode: 400,
+          });
+        }
+        if (seen.has(command)) {
+          throw new KonsierError({
+            ...createPublicApiError({
+              code: ERROR_CODES.client.configuration.invalid,
+              message: `telegram slash command "${command}" is registered more than once.`,
+            }),
+            statusCode: 400,
+          });
+        }
+        seen.add(command);
+      }
+    }
+  }
+
+  private validateProjectEvents(): void {
+    validateHandlerObject(this.projectEvents, "events");
+  }
+
+  private validateAgentEvents(): void {
+    for (const [agentKey, entry] of Object.entries(this.agents)) {
+      if (typeof entry === "function") {
+        continue;
+      }
+      validateHandlerObject(entry.events ?? {}, `agents.${agentKey}.events`);
+      validateHandlerObject(
+        entry.telegram?.events ?? {},
+        `agents.${agentKey}.telegram.events`,
+      );
+    }
   }
 
   private assertValidAgentConfig(
@@ -668,5 +833,157 @@ export class Konsier {
         statusCode,
       });
     }
+  }
+
+  private async resolveTelegramSlashCommand(
+    agent: string,
+    command: string,
+  ): Promise<TelegramSlashCommandDefinition> {
+    const resolvedAgent = await this.resolveAgentEntry(agent, null);
+    const normalized = command.trim().toLowerCase();
+    const resolved = (resolvedAgent.telegram?.slashCommands ?? []).find(
+      (entry) => entry.command.trim().toLowerCase() === normalized,
+    );
+
+    if (!resolved) {
+      throw new KonsierError({
+        ...createPublicApiError({
+          code: ERROR_CODES.validation.request.invalid,
+          message: `Telegram slash command "${command}" is not registered for agent "${agent}".`,
+        }),
+        statusCode: 404,
+      });
+    }
+
+    return resolved;
+  }
+
+  private async resolveEventHandler(
+    target:
+      | { scope: "project" }
+      | { scope: "agent"; agent: string }
+      | { scope: "channel"; agent: string; channel: "telegram" },
+    name: string,
+    phase: "before" | "on",
+  ): Promise<{ handler: (...args: any[]) => any }> {
+    const normalized = name.trim();
+    const method = eventHandlerMethodName(normalized, phase);
+    if (!method) {
+      throw new KonsierError({
+        ...createPublicApiError({
+          code: ERROR_CODES.validation.request.invalid,
+          message: `SDK event "${phase}:${name}" is not registered.`,
+        }),
+        statusCode: 404,
+      });
+    }
+
+    if (target.scope === "project") {
+      const handler = (this.projectEvents as Record<string, unknown>)[method];
+      if (typeof handler === "function") {
+        return { handler: handler as (...args: any[]) => any };
+      }
+    } else {
+      const agent = await this.resolveAgentEntry(target.agent, null);
+      if (target.scope === "agent") {
+        const handler = (agent.events as Record<string, unknown> | undefined)?.[method];
+        if (typeof handler === "function") {
+          return { handler: handler as (...args: any[]) => any };
+        }
+      } else if (target.channel === "telegram") {
+        const handler = (agent.telegram?.events as Record<string, unknown> | undefined)?.[
+          method
+        ];
+        if (typeof handler === "function") {
+          return { handler: handler as (...args: any[]) => any };
+        }
+      }
+    }
+
+    throw new KonsierError({
+      ...createPublicApiError({
+        code: ERROR_CODES.validation.request.invalid,
+        message: `SDK event "${phase}:${name}" is not registered.`,
+      }),
+      statusCode: 404,
+    });
+  }
+}
+
+function createTelegramSlashCommand(
+  definition: TelegramSlashCommandDefinition,
+): TelegramSlashCommandDefinition {
+  return {
+    command: definition.command.trim().toLowerCase(),
+    description: definition.description.trim(),
+    handler: definition.handler,
+  };
+}
+
+function hasProjectEvents(events: ProjectEventHandlers): boolean {
+  return listRegisteredKeys(events).length > 0;
+}
+
+function validateHandlerObject(
+  value: Record<string, unknown>,
+  label: string,
+): void {
+  for (const [key, entry] of Object.entries(value)) {
+    if (typeof entry === "undefined") {
+      continue;
+    }
+    if (typeof entry !== "function") {
+      throw new KonsierError({
+        ...createPublicApiError({
+          code: ERROR_CODES.client.configuration.invalid,
+          message: `${label}.${key} must be a function.`,
+        }),
+        statusCode: 400,
+      });
+    }
+  }
+}
+
+function listRegisteredKeys(value: Record<string, unknown>): string[] {
+  return Object.entries(value)
+    .filter((entry) => typeof entry[1] === "function")
+    .map((entry) => entry[0]);
+}
+
+function countProjectEvents(events: ProjectEventHandlers): number {
+  return listRegisteredKeys(events).length;
+}
+
+function eventHandlerMethodName(
+  eventName: string,
+  phase: "before" | "on",
+): string | null {
+  switch (`${phase}:${eventName}`) {
+    case "before:account.connect":
+      return "beforeAccountConnect";
+    case "on:account.connected":
+      return "onAccountConnected";
+    case "on:account.disconnected":
+      return "onAccountDisconnected";
+    case "before:conversation.created":
+      return "beforeConversationCreated";
+    case "on:conversation.created":
+      return "onConversationCreated";
+    case "before:message.received":
+      return "beforeMessageReceived";
+    case "on:message.received":
+      return "onMessageReceived";
+    case "on:conversation.cleared":
+      return "onConversationCleared";
+    case "on:conversation.deleted":
+      return "onConversationDeleted";
+    case "on:conversation.takeover":
+      return "onConversationTakeover";
+    case "on:conversation.resume":
+      return "onConversationResume";
+    case "on:human.requested":
+      return "onHumanRequested";
+    default:
+      return null;
   }
 }

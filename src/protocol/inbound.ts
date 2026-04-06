@@ -46,6 +46,41 @@ export interface ResolveAgentRequest {
   account: InboundAccount | null;
 }
 
+export interface SlashCommandRequest {
+  type: "slash_command";
+  agent: string;
+  conversation: {
+    id: number;
+    project_id: number;
+    execution_project_id: number;
+    started_at: string;
+    message_count: number;
+  };
+  messages: ToolMessage[];
+  channel: "telegram";
+  command: {
+    name: string;
+    args: string;
+    text: string;
+  };
+  account: InboundAccount | null;
+  user: InboundUser | null;
+}
+
+export interface EventDispatchRequest {
+  type: "event_dispatch";
+  target:
+    | { scope: "project" }
+    | { scope: "agent"; agent: string }
+    | { scope: "channel"; agent: string; channel: "telegram" };
+  event: {
+    name: string;
+    phase: "before" | "on";
+    payload: Record<string, unknown>;
+  };
+  account: InboundAccount | null;
+}
+
 export interface ManifestRequest {
   type: "manifest";
   account: InboundAccount | null;
@@ -54,6 +89,8 @@ export interface ManifestRequest {
 export type SdkHandlerRequest =
   | ToolCallRequest
   | ResolveAgentRequest
+  | SlashCommandRequest
+  | EventDispatchRequest
   | ManifestRequest;
 
 export type ToolCallResponse = Record<string, unknown>;
@@ -67,13 +104,42 @@ export interface ResolveAgentResponse {
   }>;
 }
 
+export interface SlashCommandResponse {
+  message?: {
+    text?: string;
+    attachments?: ToolMessage["attachments"];
+    quickReplies?: Array<{
+      label: string;
+      value: string;
+    }>;
+  };
+}
+
+export interface EventDispatchResponse {
+  end?: boolean;
+  data?: Record<string, unknown>;
+}
+
 export interface ManifestResponse {
-  agents: Array<{
-    ref: string;
-    name: string;
-    description: string | null;
-  }>;
-  internal: {
+  project?: {
+    events: string[];
+  };
+  agents: Record<
+    string,
+    {
+      name: string;
+      description: string | null;
+      events?: string[];
+      telegram?: {
+        slashCommands: Array<{
+          command: string;
+          description: string;
+        }>;
+        events?: string[];
+      };
+    }
+  >;
+  internal?: {
     tools: Array<{
       name: string;
       description: string;

@@ -245,7 +245,7 @@ export interface ConnectionCompleteResult {
 }
 
 export interface Account {
-  id: string;
+  id: string | null;
   name: string;
   metadata: Record<string, unknown>;
 }
@@ -277,6 +277,317 @@ export interface Conversation {
   messageCount: number;
 }
 
+export type ConversationMode = "automated" | "manual";
+
+export type NotificationNavigation =
+  | {
+      type: "conversation";
+      projectId: number;
+      conversationId: number;
+    }
+  | {
+      type: "page";
+      projectId: number;
+      path: string;
+    }
+  | {
+      type: "none";
+    };
+
+export interface NotificationInput {
+  kind?: string;
+  title: string;
+  body: string;
+  navigation: NotificationNavigation;
+}
+
+export type TelegramSlashCommandResult = SendMessage | EndSignal;
+
+export interface TelegramSlashCommandContext {
+  channel: "telegram";
+  command: {
+    name: string;
+    args: string;
+    text: string;
+  };
+  user: EndUser;
+  conversation: Conversation;
+  messages: ToolMessage[];
+  account: Account | null;
+  end: (message?: SendMessage) => EndSignal;
+}
+
+export interface TelegramSlashCommandDefinition {
+  command: string;
+  description: string;
+  handler: (
+    context: TelegramSlashCommandContext,
+  ) => MaybePromise<TelegramSlashCommandResult | void>;
+}
+
+export interface ConversationCreatedEventPayload {
+  project_id: number;
+  conversation_id: number;
+  group: string;
+  title: string | null;
+  timestamp: string;
+}
+
+export interface ConversationMessageReceivedEventPayload {
+  project_id: number;
+  conversation_id: number;
+  group: string;
+  mode: ConversationMode;
+  channel: string;
+  transcript: Array<{
+    role: "user" | "assistant";
+    content: string;
+  }>;
+  latest_message: {
+    role: "user" | "assistant" | null;
+    content: string | null;
+  };
+  execution_mode: "simulate" | "live";
+  agent_channel_id: number | null;
+  platform_conversation_id: string | null;
+  channel_user_id: string | null;
+  timestamp: string;
+}
+
+export interface ConversationClearedEventPayload {
+  project_id: number;
+  conversation_id: number;
+  group: string;
+  deleted_count: number;
+  timestamp: string;
+}
+
+export interface ConversationDeletedEventPayload {
+  project_id: number;
+  conversation_id: number;
+  group: string;
+  timestamp: string;
+}
+
+export interface ConversationTakeoverEventPayload {
+  project_id: number;
+  conversation_id: number;
+  group: string;
+  timestamp: string;
+}
+
+export interface ConversationResumeEventPayload {
+  project_id: number;
+  conversation_id: number;
+  group: string;
+  timestamp: string;
+}
+
+export interface HumanSupportRequestedEventPayload {
+  project_id: number;
+  conversation_id: number;
+  timestamp: string;
+}
+
+export interface ConnectedAppConnectEventPayload {
+  project_id: number;
+  token: string;
+  agent_mappings: Array<{
+    platform_ref: string;
+    client_agent_id?: number | null;
+    create_new_name?: string | null;
+  }>;
+  user_id: string;
+}
+
+export interface ConnectedAppConnectedEventPayload {
+  project_id: number;
+  timestamp: string;
+}
+
+export interface ConnectedAppDisconnectedEventPayload {
+  project_id: number;
+  connection_id: number;
+  timestamp: string;
+}
+
+export interface AgentResourceEventPayload {
+  project_id: number;
+  timestamp: string;
+  agent_id?: number;
+  name?: string | null;
+  linked_ref?: string | null;
+  linked_connection_id?: number | null;
+  refresh_id?: string;
+}
+
+export interface BeforeAccountConnectContext {
+  account: Account | null;
+  payload: ConnectedAppConnectEventPayload;
+  end: (message?: SendMessage) => EndSignal;
+}
+
+export interface AccountConnectedContext {
+  account: Account | null;
+  payload: ConnectedAppConnectedEventPayload;
+}
+
+export interface AccountDisconnectedContext {
+  account: Account | null;
+  payload: ConnectedAppDisconnectedEventPayload;
+}
+
+export interface BeforeConversationCreatedContext {
+  account: Account | null;
+  payload: ConversationCreatedEventPayload;
+  end: (message?: SendMessage) => EndSignal;
+}
+
+export interface ConversationCreatedContext {
+  account: Account | null;
+  payload: ConversationCreatedEventPayload;
+}
+
+export interface BeforeMessageReceivedContext {
+  account: Account | null;
+  payload: ConversationMessageReceivedEventPayload;
+  end: (message?: SendMessage) => EndSignal;
+}
+
+export interface MessageReceivedContext {
+  account: Account | null;
+  payload: ConversationMessageReceivedEventPayload;
+}
+
+export interface ConversationClearedContext {
+  account: Account | null;
+  payload: ConversationClearedEventPayload;
+}
+
+export interface ConversationDeletedContext {
+  account: Account | null;
+  payload: ConversationDeletedEventPayload;
+}
+
+export interface ConversationTakeoverContext {
+  account: Account | null;
+  payload: ConversationTakeoverEventPayload;
+}
+
+export interface ConversationResumeContext {
+  account: Account | null;
+  payload: ConversationResumeEventPayload;
+}
+
+export interface HumanRequestedContext {
+  account: Account | null;
+  payload: HumanSupportRequestedEventPayload;
+}
+
+export type ProjectEventHandlers = {
+  beforeAccountConnect?: (
+    ctx: BeforeAccountConnectContext,
+  ) => MaybePromise<void | EndSignal>;
+  onAccountConnected?: (ctx: AccountConnectedContext) => MaybePromise<void>;
+  onAccountDisconnected?: (
+    ctx: AccountDisconnectedContext,
+  ) => MaybePromise<void>;
+};
+
+export type AgentEventHandlers = {
+  beforeConversationCreated?: (
+    ctx: BeforeConversationCreatedContext,
+  ) => MaybePromise<void | EndSignal>;
+  onConversationCreated?: (
+    ctx: ConversationCreatedContext,
+  ) => MaybePromise<void>;
+  beforeMessageReceived?: (
+    ctx: BeforeMessageReceivedContext,
+  ) => MaybePromise<void | EndSignal>;
+  onMessageReceived?: (ctx: MessageReceivedContext) => MaybePromise<void>;
+  onConversationCleared?: (
+    ctx: ConversationClearedContext,
+  ) => MaybePromise<void>;
+  onConversationDeleted?: (
+    ctx: ConversationDeletedContext,
+  ) => MaybePromise<void>;
+  onConversationTakeover?: (
+    ctx: ConversationTakeoverContext,
+  ) => MaybePromise<void>;
+  onConversationResume?: (
+    ctx: ConversationResumeContext,
+  ) => MaybePromise<void>;
+  onHumanRequested?: (ctx: HumanRequestedContext) => MaybePromise<void>;
+};
+
+export type TelegramEventHandlers = {};
+
+export interface AgentTelegramConfig {
+  slashCommands?: TelegramSlashCommandDefinition[];
+  events?: TelegramEventHandlers;
+}
+
+export interface ConversationSummary {
+  id: number;
+  project_id: number;
+  group: string;
+  agent_channel_id: number | null;
+  platform_conversation_id: string | null;
+  title: string | null;
+  metadata: Record<string, unknown> | null;
+  mode: ConversationMode;
+  deleted_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ConversationEntryRecord {
+  entry_type: "message" | "tool_call";
+  index: number;
+  role?: string;
+  message?: MessageEnvelope | null;
+  content?: string;
+}
+
+export interface ConversationListInput {
+  userId?: string | number;
+  agentRef?: string;
+  channel?: string;
+  limit?: number;
+  cursor?: string;
+}
+
+export interface ConversationMessagesListInput {
+  before?: number;
+  limit?: number;
+}
+
+export interface ConversationListResult {
+  conversations: ConversationSummary[];
+}
+
+export interface ConversationDetailResult {
+  conversation: ConversationSummary;
+  entries: ConversationEntryRecord[];
+}
+
+export interface ConversationMessagesListResult {
+  conversation: ConversationSummary;
+  messages: ConversationEntryRecord[];
+}
+
+export interface ConversationHandle {
+  get: () => Promise<ConversationDetailResult>;
+  messages: {
+    list: (input?: ConversationMessagesListInput) => Promise<ConversationMessagesListResult>;
+  };
+  sendMessage: (input: SendMessage) => Promise<Record<string, unknown>>;
+  clear: () => Promise<Record<string, unknown>>;
+  delete: () => Promise<Record<string, unknown>>;
+  takeover: () => Promise<Record<string, unknown>>;
+  resume: () => Promise<Record<string, unknown>>;
+}
+
 export interface ToolContext {
   channel: Channel;
   agent: string;
@@ -302,7 +613,8 @@ export interface AgentConfig {
   description?: string | null;
   systemPrompt: string;
   tools: Array<Tool<any, JsonObject>>;
-  events?: AgentEvents;
+  telegram?: AgentTelegramConfig;
+  events?: AgentEventHandlers;
 }
 
 export interface AgentManifestEntry {
@@ -334,6 +646,7 @@ export interface KonsierOptions {
   apiKey: string;
   agents?: Record<string, AgentEntry>;
   internal?: InternalEntry;
+  events?: ProjectEventHandlers;
   endpointUrl?: string;
   debug?: boolean;
 }

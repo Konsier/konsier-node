@@ -63,7 +63,6 @@ export function resolvePageRequest(
       account: verifiedLaunch.payload.account,
       user: verifiedLaunch.payload.user,
       theme: verifiedLaunch.payload.theme,
-      exp: Date.now() + (options.pageSessionTtlMs ?? DEFAULT_PAGE_SESSION_TTL_MS),
     });
 
     const cleanUrl = new URL(pageUrl.toString());
@@ -85,7 +84,6 @@ export function resolvePageRequest(
         "set-cookie": serializePageSessionCookie(
           sessionToken,
           pageUrl.protocol === "https:",
-          options.pageSessionTtlMs ?? DEFAULT_PAGE_SESSION_TTL_MS,
         ),
       },
     };
@@ -226,14 +224,12 @@ function readPageSessionCookie(
 function serializePageSessionCookie(
   value: string,
   secure: boolean,
-  ttlMs: number,
 ): string {
   const parts = [
     `${PAGE_SESSION_COOKIE_NAME}=${value}`,
     "Path=/",
     "HttpOnly",
     "SameSite=Lax",
-    `Max-Age=${Math.max(1, Math.floor(ttlMs / 1000))}`,
   ];
   if (secure) {
     parts.push("Secure");

@@ -33,7 +33,7 @@ type SerializedAttachInput =
       address?: string;
     };
 
-function serializeAttachments(
+export function serializeAttachments(
   attachments: AttachInput[] | undefined,
 ): SerializedAttachInput[] | undefined {
   if (!attachments || attachments.length === 0) {

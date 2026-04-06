@@ -209,6 +209,551 @@ describe("webhookHandler", () => {
     });
   });
 
+  it("handles telegram slash_command requests", async () => {
+    const commandSdk = new Konsier({
+      apiKey,
+      endpointUrl: "https://example.com/konsier",
+      agents: {
+        customer: {
+          systemPrompt: "Support",
+          tools: [],
+          telegram: {
+            slashCommands: [
+              Konsier.telegram.slashCommand({
+                command: "start",
+                description: "Start a new conversation",
+                handler: async (ctx) => ({
+                  text: `${ctx.command.name}:${ctx.command.args}:${ctx.user.id}`,
+                }),
+              }),
+            ],
+          },
+        },
+      },
+    });
+    const commandHandler = commandSdk.webhookHandler();
+
+    const req = createSignedRequest(apiKey, {
+      type: "slash_command",
+      agent: "customer",
+      conversation: {
+        id: 1,
+        project_id: 10,
+        execution_project_id: 10,
+        started_at: "2026-03-10T00:00:00.000Z",
+        message_count: 1,
+      },
+      messages: [
+        {
+          text: "/start fresh",
+          sentAt: "2026-03-10T00:00:00.000Z",
+        },
+      ],
+      channel: "telegram",
+      command: {
+        name: "start",
+        args: "fresh",
+        text: "/start fresh",
+      },
+      account: null,
+      user: {
+        id: 7,
+        external_id: null,
+        name: "Jamie",
+        metadata: null,
+      },
+    });
+    const { res, state } = createMockResponse();
+
+    await commandHandler(req as never, res as never);
+
+    expect(state.statusCode).toBe(200);
+    expect(state.body).toEqual({
+      message: {
+        text: "start:fresh:7",
+      },
+    });
+  });
+
+  it("supports ctx.end() in telegram slash_command handlers", async () => {
+    const commandSdk = new Konsier({
+      apiKey,
+      endpointUrl: "https://example.com/konsier",
+      agents: {
+        customer: {
+          systemPrompt: "Support",
+          tools: [],
+          telegram: {
+            slashCommands: [
+              Konsier.telegram.slashCommand({
+                command: "reset",
+                description: "Reset the thread",
+                handler: (ctx) => ctx.end({ text: "Fresh start!" }),
+              }),
+            ],
+          },
+        },
+      },
+    });
+    const commandHandler = commandSdk.webhookHandler();
+
+    const req = createSignedRequest(apiKey, {
+      type: "slash_command",
+      agent: "customer",
+      conversation: {
+        id: 1,
+        project_id: 10,
+        execution_project_id: 10,
+        started_at: "2026-03-10T00:00:00.000Z",
+        message_count: 1,
+      },
+      messages: [],
+      channel: "telegram",
+      command: {
+        name: "reset",
+        args: "",
+        text: "/reset",
+      },
+      account: null,
+      user: {
+        id: 7,
+        external_id: null,
+        name: "Jamie",
+        metadata: null,
+      },
+    });
+    const { res, state } = createMockResponse();
+
+    await commandHandler(req as never, res as never);
+
+    expect(state.statusCode).toBe(200);
+    expect(state.body).toEqual({
+      message: {
+        text: "Fresh start!",
+      },
+    });
+  });
+
+  it("dispatches project and agent events through event_dispatch", async () => {
+    const seen: Array<Record<string, unknown>> = [];
+    const eventSdk = new Konsier({
+      apiKey,
+      endpointUrl: "https://example.com/konsier",
+      events: {
+        onAccountConnected: async (ctx) => {
+          seen.push({
+            scope: "project",
+            accountId: ctx.account?.id ?? null,
+            payload: ctx.payload,
+          });
+        },
+      },
+      agents: {
+        customer: {
+          systemPrompt: "Support",
+          tools: [],
+          events: {
+            onMessageReceived: async (ctx) => {
+              seen.push({
+                scope: "agent",
+                payload: ctx.payload,
+              });
+            },
+          },
+        },
+      },
+    });
+    const eventHandler = eventSdk.webhookHandler();
+
+    const projectReq = createSignedRequest(apiKey, {
+      type: "event_dispatch",
+      target: {
+        scope: "project",
+      },
+      event: {
+        name: "account.connected",
+        phase: "on",
+        payload: {
+          connection_id: "conn_1",
+        },
+      },
+      account: {
+        id: "acct_1",
+        name: "Acme",
+        metadata: {},
+      },
+    });
+    const projectRes = createMockResponse();
+
+    await eventHandler(projectReq as never, projectRes.res as never);
+
+    const agentReq = createSignedRequest(apiKey, {
+      type: "event_dispatch",
+      target: {
+        scope: "agent",
+        agent: "customer",
+      },
+      event: {
+        name: "message.received",
+        phase: "on",
+        payload: {
+          conversation_id: 10,
+          text: "hello",
+        },
+      },
+      account: null,
+    });
+    const agentRes = createMockResponse();
+
+    await eventHandler(agentReq as never, agentRes.res as never);
+
+    expect(projectRes.state.statusCode).toBe(200);
+    expect(projectRes.state.body).toEqual({ data: {} });
+    expect(agentRes.state.statusCode).toBe(200);
+    expect(agentRes.state.body).toEqual({ data: {} });
+    expect(seen).toEqual([
+      {
+        scope: "project",
+        accountId: "acct_1",
+        payload: {
+          connection_id: "conn_1",
+        },
+      },
+      {
+        scope: "agent",
+        payload: {
+          conversation_id: 10,
+          text: "hello",
+        },
+      },
+    ]);
+  });
+
+  it("supports ctx.end() in before event handlers", async () => {
+    const eventSdk = new Konsier({
+      apiKey,
+      endpointUrl: "https://example.com/konsier",
+      agents: {
+        customer: {
+          systemPrompt: "Support",
+          tools: [],
+          events: {
+            beforeMessageReceived: (ctx) => {
+              expect(ctx.payload).toEqual({
+                conversation_id: 10,
+              });
+              return ctx.end({ text: "handled manually" });
+            },
+          },
+        },
+      },
+    });
+    const eventHandler = eventSdk.webhookHandler();
+
+    const req = createSignedRequest(apiKey, {
+      type: "event_dispatch",
+      target: {
+        scope: "agent",
+        agent: "customer",
+      },
+      event: {
+        name: "message.received",
+        phase: "before",
+        payload: {
+          conversation_id: 10,
+        },
+      },
+      account: null,
+    });
+    const { res, state } = createMockResponse();
+
+    await eventHandler(req as never, res as never);
+
+    expect(state.statusCode).toBe(200);
+    expect(state.body).toEqual({
+      end: true,
+      data: {
+        text: "handled manually",
+      },
+    });
+  });
+
+  it("returns 400 for invalid slash_command payloads", async () => {
+    const req = createSignedRequest(apiKey, {
+      type: "slash_command",
+      agent: "customer",
+      conversation: {
+        id: 1,
+        project_id: 10,
+        execution_project_id: 10,
+        started_at: "2026-03-10T00:00:00.000Z",
+        message_count: 1,
+      },
+      messages: [],
+      channel: "telegram",
+      command: {
+        name: "",
+        args: "",
+        text: "/bad",
+      },
+      account: null,
+      user: null,
+    });
+    const { res, state } = createMockResponse();
+
+    await handler(req as never, res as never);
+
+    expect(state.statusCode).toBe(400);
+    expect(state.body).toEqual({
+      error: {
+        code: "validation.request.invalid",
+        message: "Invalid slash_command request.",
+        action: "Check the request input and try again.",
+      },
+    });
+  });
+
+  it("returns 400 for invalid event_dispatch payloads", async () => {
+    const req = createSignedRequest(apiKey, {
+      type: "event_dispatch",
+      target: {
+        scope: "agent",
+      },
+      event: {
+        name: "message.received",
+        phase: "before",
+        payload: {},
+      },
+      account: null,
+    });
+    const { res, state } = createMockResponse();
+
+    await handler(req as never, res as never);
+
+    expect(state.statusCode).toBe(400);
+    expect(state.body).toEqual({
+      error: {
+        code: "validation.request.invalid",
+        message: "Invalid event_dispatch request.",
+        action: "Check the request input and try again.",
+      },
+    });
+  });
+
+  it("returns 404 for unknown slash commands on an agent", async () => {
+    const commandSdk = new Konsier({
+      apiKey,
+      endpointUrl: "https://example.com/konsier",
+      agents: {
+        customer: {
+          systemPrompt: "Support",
+          tools: [],
+          telegram: {
+            slashCommands: [
+              Konsier.telegram.slashCommand({
+                command: "start",
+                description: "Start",
+                handler: async () => ({ text: "ok" }),
+              }),
+            ],
+          },
+        },
+      },
+    });
+    const commandHandler = commandSdk.webhookHandler();
+    const req = createSignedRequest(apiKey, {
+      type: "slash_command",
+      agent: "customer",
+      conversation: {
+        id: 1,
+        project_id: 10,
+        execution_project_id: 10,
+        started_at: "2026-03-10T00:00:00.000Z",
+        message_count: 1,
+      },
+      messages: [],
+      channel: "telegram",
+      command: {
+        name: "missing",
+        args: "",
+        text: "/missing",
+      },
+      account: null,
+      user: null,
+    });
+    const { res, state } = createMockResponse();
+
+    await commandHandler(req as never, res as never);
+
+    expect(state.statusCode).toBe(404);
+    expect(state.body).toEqual({
+      error: {
+        code: "validation.request.invalid",
+        message:
+          'Telegram slash command "missing" is not registered for agent "customer".',
+        action: "Check the request input and try again.",
+      },
+    });
+  });
+
+  it("returns 404 for unknown event names", async () => {
+    const eventSdk = new Konsier({
+      apiKey,
+      endpointUrl: "https://example.com/konsier",
+      agents: {
+        customer: {
+          systemPrompt: "Support",
+          tools: [],
+        },
+      },
+    });
+    const eventHandler = eventSdk.webhookHandler();
+    const req = createSignedRequest(apiKey, {
+      type: "event_dispatch",
+      target: {
+        scope: "agent",
+        agent: "customer",
+      },
+      event: {
+        name: "unknown.event",
+        phase: "on",
+        payload: {},
+      },
+      account: null,
+    });
+    const { res, state } = createMockResponse();
+
+    await eventHandler(req as never, res as never);
+
+    expect(state.statusCode).toBe(404);
+    expect(state.body).toEqual({
+      error: {
+        code: "validation.request.invalid",
+        message: 'SDK event "on:unknown.event" is not registered.',
+        action: "Check the request input and try again.",
+      },
+    });
+  });
+
+  it("returns 404 for unknown agent event targets", async () => {
+    const eventSdk = new Konsier({
+      apiKey,
+      endpointUrl: "https://example.com/konsier",
+      agents: {
+        customer: {
+          systemPrompt: "Support",
+          tools: [],
+        },
+      },
+    });
+    const eventHandler = eventSdk.webhookHandler();
+    const req = createSignedRequest(apiKey, {
+      type: "event_dispatch",
+      target: {
+        scope: "agent",
+        agent: "missing",
+      },
+      event: {
+        name: "message.received",
+        phase: "on",
+        payload: {},
+      },
+      account: null,
+    });
+    const { res, state } = createMockResponse();
+
+    await eventHandler(req as never, res as never);
+
+    expect(state.statusCode).toBe(404);
+    expect(state.body).toEqual({
+      error: {
+        code: "agent.resource.not_found",
+        message: 'Agent "missing" is not registered in this SDK instance.',
+        action: "Check the agent identifier and try again.",
+      },
+    });
+  });
+
+  it("returns 400 for malformed slash_command account or user payloads", async () => {
+    const req = createSignedRequest(apiKey, {
+      type: "slash_command",
+      agent: "customer",
+      conversation: {
+        id: 1,
+        project_id: 10,
+        execution_project_id: 10,
+        started_at: "2026-03-10T00:00:00.000Z",
+        message_count: 1,
+      },
+      messages: [],
+      channel: "telegram",
+      command: {
+        name: "start",
+        args: "",
+        text: "/start",
+      },
+      account: {
+        id: 1,
+      },
+      user: {
+        id: 7,
+        external_id: null,
+        name: null,
+        metadata: "bad",
+      },
+    });
+    const { res, state } = createMockResponse();
+
+    await handler(req as never, res as never);
+
+    expect(state.statusCode).toBe(400);
+    expect(state.body).toEqual({
+      error: {
+        code: "validation.request.invalid",
+        message: "Invalid slash_command request.",
+        action: "Check the request input and try again.",
+      },
+    });
+  });
+
+  it("normalizes non-object event handler returns to empty data", async () => {
+    const eventSdk = new Konsier({
+      apiKey,
+      endpointUrl: "https://example.com/konsier",
+      agents: {
+        customer: {
+          systemPrompt: "Support",
+          tools: [],
+          events: {
+            onMessageReceived: async () => "ignored" as never,
+          },
+        },
+      },
+    });
+    const eventHandler = eventSdk.webhookHandler();
+    const req = createSignedRequest(apiKey, {
+      type: "event_dispatch",
+      target: {
+        scope: "agent",
+        agent: "customer",
+      },
+      event: {
+        name: "message.received",
+        phase: "on",
+        payload: {},
+      },
+      account: null,
+    });
+    const { res, state } = createMockResponse();
+
+    await eventHandler(req as never, res as never);
+
+    expect(state.statusCode).toBe(200);
+    expect(state.body).toEqual({
+      data: {},
+    });
+  });
+
   it("exports attachment helper inputs as att refs and parses resolved attachments", async () => {
     const attachTool = Konsier.tool({
       name: "Save Receipt",
