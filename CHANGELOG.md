@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## v0.4.0 - 2026-04-08
+
+### Features
+
+- add cloud conversation and notify APIs (c9f3816)
+
 ## v0.3.2 - 2026-04-04
 
 ### Features
