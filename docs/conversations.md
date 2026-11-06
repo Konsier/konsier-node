@@ -30,8 +30,10 @@ Supported filters:
 type ConversationHandle = {
   get: () => Promise<ConversationDetailResult>;
   messages: {
-    list: (input?: { before?: number; limit?: number }) =>
-      Promise<ConversationMessagesListResult>;
+    list: (input?: {
+      before?: number;
+      limit?: number;
+    }) => Promise<ConversationMessagesListResult>;
   };
   sendMessage: (input: SendMessage) => Promise<Record<string, unknown>>;
   clear: () => Promise<Record<string, unknown>>;
@@ -74,11 +76,12 @@ type ConversationSummary = {
 };
 
 type ConversationEntryRecord = {
-  entry_type: "message" | "tool_call";
+  entry_type: "message";
   index: number;
   role?: string;
   message?: MessageEnvelope | null;
   content?: string;
+  agent_run?: AgentRunTrace;
 };
 
 type ConversationDetailResult = {
@@ -113,14 +116,12 @@ Use `before` to fetch older entries than the current page.
 
 ## Sending Messages
 
-`conversation.sendMessage(...)` accepts the same `SendMessage` payload used by `ctx.end(...)`.
+`conversation.sendMessage(...)` accepts a `SendMessage` payload.
 
 ```ts
 await conversation.sendMessage({
   text: "A human agent is joining the conversation.",
-  quickReplies: [
-    { label: "Track order", value: "track order" },
-  ],
+  quickReplies: [{ label: "Track order", value: "track order" }],
 });
 ```
 

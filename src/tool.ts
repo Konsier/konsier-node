@@ -5,16 +5,15 @@ import { KonsierError, toErrorMessage } from "./errors";
 import type {
   AttachmentType,
   AudioAttachment,
-  EndSignal,
   FileAttachment,
   ImageAttachment,
   JsonObject,
   LocationAttachment,
-  ToolContext,
+  OperationContext,
   VideoAttachment,
 } from "./types";
 
-const TOOL_KEY_REGEX = /^[a-zA-Z0-9_-]+$/;
+const OPERATION_SEGMENT_REGEX = /^[a-z][a-z0-9_-]*$/;
 const ATTACHMENT_REF_PATTERN = "^att:[^\\s]+$";
 const KONSIER_SCHEMA_KEY = "x-konsier";
 
@@ -27,50 +26,69 @@ type AttachmentSchemaMetadata = {
   allowed_types: AttachmentType[];
 };
 
-export interface ToolInputSchema<TInput> {
-  parse?: (input: unknown) => TInput;
-  safeParse?: (input: unknown) => SafeParseResult<TInput>;
+export interface OperationSchema<TValue> {
+  parse?: (input: unknown) => TValue;
+  safeParse?: (input: unknown) => SafeParseResult<TValue>;
   toJSONSchema?: () => Record<string, unknown>;
   toJsonSchema?: () => Record<string, unknown>;
 }
 
-export interface ToolDefinition<
+export interface OperationApproval {
+  required: boolean;
+  bypassable?: boolean;
+}
+
+export interface OperationDefinition<
   TInput = unknown,
   TOutput extends JsonObject = JsonObject,
 > {
-  name: string;
+  service: string;
+  resource: string;
+  action: string;
+  title: string;
   description: string;
-  input: ToolInputSchema<TInput>;
+  input: OperationSchema<TInput>;
+  output: OperationSchema<TOutput>;
+  approval?: OperationApproval;
   handler: (
     input: TInput,
-    context: ToolContext,
-  ) => Promise<TOutput | EndSignal> | TOutput | EndSignal;
+    context: OperationContext,
+  ) => Promise<TOutput> | TOutput;
 }
 
-export interface Tool<
+export interface Operation<
   TInput = any,
   TOutput extends JsonObject = JsonObject,
 > {
-  name: string;
-  key: string;
+  service: string;
+  resource: string;
+  action: string;
+  title: string;
   description: string;
   inputSchema: Record<string, unknown>;
+  outputSchema: Record<string, unknown>;
+  approval: Required<OperationApproval>;
   parseInput: (input: unknown) => TInput;
+  parseOutput: (output: unknown) => TOutput;
   handler: (
     input: TInput,
-    context: ToolContext,
-  ) => Promise<TOutput | EndSignal> | TOutput | EndSignal;
+    context: OperationContext,
+  ) => Promise<TOutput> | TOutput;
 }
 
-export function createTool<
+export function createOperation<
   TInput,
   TOutput extends JsonObject = JsonObject,
->(definition: ToolDefinition<TInput, TOutput>): Tool<TInput, TOutput> {
-  const name = definition.name?.trim();
-  if (!name) {
+>(definition: OperationDefinition<TInput, TOutput>): Operation<TInput, TOutput> {
+  const service = validateOperationSegment("service", definition.service);
+  const resource = validateOperationSegment("resource", definition.resource);
+  const action = validateOperationSegment("action", definition.action);
+  const operationRef = `${service}.${resource}.${action}`;
+  const title = definition.title?.trim();
+  if (!title) {
     const publicError = createPublicApiError({
-      code: ERROR_CODES.tool.configuration.invalid,
-      message: "Tool name is required.",
+      code: ERROR_CODES.operation.configuration.invalid,
+      message: `Operation "${operationRef}" must include a title.`,
     });
     throw new KonsierError({
       code: publicError.code,
@@ -80,13 +98,11 @@ export function createTool<
     });
   }
 
-  const key = normalizeToolKey(name);
-
   const description = definition.description?.trim();
   if (!description) {
     const publicError = createPublicApiError({
-      code: ERROR_CODES.tool.configuration.invalid,
-      message: `Tool "${name}" must include a description.`,
+      code: ERROR_CODES.operation.configuration.invalid,
+      message: `Operation "${operationRef}" must include a description.`,
     });
     throw new KonsierError({
       code: publicError.code,
@@ -98,8 +114,8 @@ export function createTool<
 
   if (typeof definition.handler !== "function") {
     const publicError = createPublicApiError({
-      code: ERROR_CODES.tool.configuration.invalid,
-      message: `Tool "${name}" handler must be a function.`,
+      code: ERROR_CODES.operation.configuration.invalid,
+      message: `Operation "${operationRef}" handler must be a function.`,
     });
     throw new KonsierError({
       code: publicError.code,
@@ -109,18 +125,51 @@ export function createTool<
     });
   }
 
-  const inputSchema = deriveInputSchema(name, definition.input);
+  const inputSchema = deriveSchema(definition.input);
+  const outputSchema = deriveSchema(definition.output);
+  const required = definition.approval?.required ?? false;
+  const bypassable = definition.approval?.bypassable ?? false;
+  if (bypassable && !required) {
+    throw new KonsierError({
+      ...createPublicApiError({
+        code: ERROR_CODES.operation.configuration.invalid,
+        message: `Operation "${operationRef}" cannot be bypassable unless approval is required.`,
+      }),
+      statusCode: 400,
+    });
+  }
 
   return {
-    name,
-    key,
+    service,
+    resource,
+    action,
+    title,
     description,
     inputSchema,
+    outputSchema,
+    approval: { required, bypassable },
     parseInput(input: unknown): TInput {
-      return parseToolInput(name, definition.input, input);
+      return parseOperationValue(operationRef, "input", definition.input, input);
+    },
+    parseOutput(output: unknown): TOutput {
+      return parseOperationValue(operationRef, "output", definition.output, output);
     },
     handler: definition.handler,
   };
+}
+
+function validateOperationSegment(label: string, value: string): string {
+  const normalized = value?.trim();
+  if (!normalized || !OPERATION_SEGMENT_REGEX.test(normalized)) {
+    throw new KonsierError({
+      ...createPublicApiError({
+        code: ERROR_CODES.operation.configuration.invalid,
+        message: `Operation ${label} must match ${OPERATION_SEGMENT_REGEX.source}.`,
+      }),
+      statusCode: 400,
+    });
+  }
+  return normalized;
 }
 
 function attachmentSchemaMetadata(
@@ -194,35 +243,12 @@ export type AttachmentSchemaValue =
   | FileAttachment
   | LocationAttachment;
 
-export function normalizeToolKey(name: string): string {
-  const normalized = name
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "")
-    .replace(/_+/g, "_");
-
-  if (!normalized || !TOOL_KEY_REGEX.test(normalized)) {
-    const publicError = createPublicApiError({
-      code: ERROR_CODES.tool.configuration.invalid,
-      message: `Tool name "${name}" could not be normalized into a valid tool identifier.`,
-    });
-    throw new KonsierError({
-      code: publicError.code,
-      message: publicError.message,
-      action: publicError.action,
-      statusCode: 400,
-    });
-  }
-
-  return normalized;
-}
-
-function parseToolInput<TInput>(
-  toolName: string,
-  schema: ToolInputSchema<TInput>,
+function parseOperationValue<TValue>(
+  operationRef: string,
+  direction: "input" | "output",
+  schema: OperationSchema<TValue>,
   input: unknown,
-): TInput {
+): TValue {
   if (schema && typeof schema.safeParse === "function") {
     const parsed = schema.safeParse(input);
     if (parsed.success) {
@@ -232,7 +258,7 @@ function parseToolInput<TInput>(
     throw new KonsierError({
       ...createPublicApiError({
         code: ERROR_CODES.validation.request.invalid,
-        message: `Tool "${toolName}" received invalid input: ${formatParseError(
+        message: `Operation "${operationRef}" produced invalid ${direction}: ${formatParseError(
           parsed.error,
         )}`,
       }),
@@ -248,7 +274,7 @@ function parseToolInput<TInput>(
       throw new KonsierError({
         ...createPublicApiError({
           code: ERROR_CODES.validation.request.invalid,
-          message: `Tool "${toolName}" received invalid input: ${toErrorMessage(
+          message: `Operation "${operationRef}" produced invalid ${direction}: ${toErrorMessage(
             error,
           )}`,
         }),
@@ -258,12 +284,11 @@ function parseToolInput<TInput>(
     }
   }
 
-  return input as TInput;
+  return input as TValue;
 }
 
-function deriveInputSchema<TInput>(
-  toolName: string,
-  schema: ToolInputSchema<TInput>,
+function deriveSchema<TValue>(
+  schema: OperationSchema<TValue>,
 ): Record<string, unknown> {
   if (schema && typeof schema.toJSONSchema === "function") {
     const converted = replaceAttachmentSchemaNodes(schema.toJSONSchema());
@@ -374,7 +399,7 @@ function buildAttachmentRefSchema(
   };
 }
 
-function isZodSchema<TInput>(schema: ToolInputSchema<TInput>): boolean {
+function isZodSchema<TValue>(schema: OperationSchema<TValue>): boolean {
   if (!schema || typeof schema !== "object") {
     return false;
   }

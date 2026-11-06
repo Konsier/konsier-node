@@ -10,8 +10,11 @@ import { getHeaderValue, verifyKonsierSignature } from "../protocol/signatures";
 import type { HttpRequestLike, HttpResponseLike, NextFunction } from "../types";
 import type { ManifestResponse } from "../protocol/inbound";
 import { asResolveAgentRequest, resolveAgentRequest } from "./resolve-agent";
-import { asToolCallRequest, executeToolCallRequest } from "./tool-call";
-import type { Account, EndSignal, EndUser, JsonObject, SendMessage } from "../types";
+import {
+  asOperationInvokeRequest,
+  executeOperationInvokeRequest,
+} from "./tool-call";
+import type { Account, EndUser, JsonObject, SendMessage } from "../types";
 import type {
   EventDispatchRequest,
   EventDispatchResponse,
@@ -25,7 +28,7 @@ export interface HandlerDependencies {
   allowedClockSkewMs?: number;
   rawBodyProperty?: string;
   debug?: boolean;
-  handleToolCall: Parameters<typeof executeToolCallRequest>[1];
+  handleOperationInvoke: Parameters<typeof executeOperationInvokeRequest>[1];
   handleResolveAgent: Parameters<typeof resolveAgentRequest>[1];
   handleSlashCommand: {
     resolveSlashCommand: (agent: string, command: string) => Promise<{
@@ -46,8 +49,7 @@ export interface HandlerDependencies {
         };
         messages: SlashCommandRequest["messages"];
         account: Account | null;
-        end: (message?: SendMessage) => EndSignal;
-      }) => Promise<SendMessage | EndSignal | void> | SendMessage | EndSignal | void;
+      }) => Promise<SendMessage | void> | SendMessage | void;
     }>;
   };
   handleEventDispatch: {
@@ -64,8 +66,7 @@ export interface HandlerDependencies {
         phase: "before" | "on";
         payload: Record<string, unknown>;
         account: Account | null;
-        end: (message?: SendMessage) => EndSignal;
-      }) => Promise<JsonObject | EndSignal | void> | JsonObject | EndSignal | void;
+      }) => Promise<JsonObject | void> | JsonObject | void;
     }>;
   };
   handleManifest: {
@@ -156,28 +157,31 @@ export function createHandler(dependencies: HandlerDependencies) {
         type: payload.type,
       });
 
-      const toolCall = asToolCallRequest(payload);
-      if (toolCall) {
-        const response = await executeToolCallRequest(
-          toolCall,
-          dependencies.handleToolCall,
+      const operationInvoke = asOperationInvokeRequest(payload);
+      if (operationInvoke) {
+        const response = await executeOperationInvokeRequest(
+          operationInvoke,
+          dependencies.handleOperationInvoke,
         );
-        debugLog(debug, "tool_call handled", {
-          agent: toolCall.target.type === "agent" ? toolCall.target.agent : null,
-          tool: toolCall.tool,
+        debugLog(debug, "operation_invoke handled", {
+          agent:
+            operationInvoke.target.type === "agent"
+              ? operationInvoke.target.agent
+              : null,
+          operation: operationInvoke.operation,
           output: response,
         });
         sendJson(res, 200, response);
         return;
       }
-      if (payload.type === "tool_call") {
-        debugLog(debug, "invalid tool_call payload");
+      if (payload.type === "operation_invoke") {
+        debugLog(debug, "invalid operation_invoke payload");
         sendJson(
           res,
           400,
           createApiErrorBody({
             code: ERROR_CODES.validation.request.invalid,
-            message: "Invalid tool_call request.",
+            message: "Invalid operation_invoke request.",
           }),
         );
         return;
@@ -267,7 +271,7 @@ export function createHandler(dependencies: HandlerDependencies) {
           accountId: manifest.account?.id ?? null,
           agentCount: Object.keys(response.agents).length,
           pageCount: response.internal?.pages.length ?? 0,
-          toolCount: response.internal?.tools.length ?? 0,
+          operationCount: response.internal?.operations.length ?? 0,
         });
         sendJson(res, 200, response);
         return;
@@ -409,15 +413,13 @@ async function executeSlashCommandRequest(
     },
     messages: request.messages,
     account: normalizeAccount(request.account),
-    end: (message) => createEndSignal(message),
   });
 
   if (!result) {
     return {};
   }
 
-  const end = asEndSignal(result);
-  const message = end?.message ?? result;
+  const message = result;
   if (!message || typeof message !== "object" || Array.isArray(message)) {
     return {};
   }
@@ -450,16 +452,7 @@ async function executeEventDispatchRequest(
       phase: request.event.phase,
       payload: request.event.payload,
       account: normalizeAccount(request.account),
-      end: (message) => createEndSignal(message),
     })) ?? {};
-
-  const end = asEndSignal(result);
-  if (end) {
-    return {
-      end: true,
-      data: serializeEndMessage(end.message),
-    };
-  }
 
   return {
     data:
@@ -528,48 +521,6 @@ function normalizeAccount(account: InboundAccount | null): Account | null {
     name: account.name,
     metadata: account.metadata ?? {},
   };
-}
-
-function createEndSignal(message?: SendMessage): EndSignal {
-  return {
-    __konsierEnd: true,
-    ...(message ? { message } : {}),
-  };
-}
-
-function asEndSignal(value: unknown): EndSignal | null {
-  if (
-    !value ||
-    typeof value !== "object" ||
-    Array.isArray(value) ||
-    !("__konsierEnd" in value) ||
-    (value as { __konsierEnd?: unknown }).__konsierEnd !== true
-  ) {
-    return null;
-  }
-
-  return value as EndSignal;
-}
-
-function serializeEndMessage(message: SendMessage | undefined): Record<string, unknown> {
-  if (!message) {
-    return {};
-  }
-
-  const result: Record<string, unknown> = {};
-  if (typeof message.text === "string" && message.text.trim().length > 0) {
-    result.text = message.text;
-  }
-  if (Array.isArray(message.quickReplies) && message.quickReplies.length > 0) {
-    result.quickReplies = message.quickReplies.map((reply) => ({
-      label: reply.label,
-      value: reply.value,
-    }));
-  }
-  if (Array.isArray(message.attachments) && message.attachments.length > 0) {
-    result.attachments = message.attachments;
-  }
-  return result;
 }
 
 function normalizeUser(user: InboundUser | null): EndUser {

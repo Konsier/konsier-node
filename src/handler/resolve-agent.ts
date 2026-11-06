@@ -59,10 +59,15 @@ export async function resolveAgentRequest(
 
   return {
     systemPrompt: resolved.systemPrompt,
-    tools: resolved.tools.map((tool) => ({
-      name: tool.key,
-      description: tool.description,
-      input: tool.inputSchema,
+    operations: resolved.operations.map((operation) => ({
+      service: operation.service,
+      resource: operation.resource,
+      action: operation.action,
+      title: operation.title,
+      description: operation.description,
+      inputSchema: operation.inputSchema,
+      outputSchema: operation.outputSchema,
+      approval: operation.approval,
     })),
   };
 }

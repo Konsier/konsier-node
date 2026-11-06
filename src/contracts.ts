@@ -351,14 +351,7 @@ export const ERRORS = {
       exhausted: {
         code: "billing.balance.exhausted",
         message: "This project has run out of balance.",
-        action: "Add funds or enable overflow billing, then try again."
-      }
-    },
-    overflow: {
-      unavailable: {
-        code: "billing.overflow.unavailable",
-        message: "This project cannot continue because balance is exhausted and overflow billing is unavailable.",
-        action: "Add funds or enable overflow billing, then try again."
+        action: "Add funds, then try again."
       }
     },
     configuration: {
@@ -726,26 +719,26 @@ export const ERRORS = {
       }
     }
   },
-  tool: {
+  operation: {
     resource: {
       not_found: {
-        code: "tool.resource.not_found",
-        message: "The requested tool could not be found.",
-        action: "Check the tool registration and try again."
+        code: "operation.resource.not_found",
+        message: "The requested operation could not be found.",
+        action: "Check the operation registration and try again."
       }
     },
     configuration: {
       invalid: {
-        code: "tool.configuration.invalid",
-        message: "The tool configuration is invalid.",
-        action: "Check the tool definition and try again."
+        code: "operation.configuration.invalid",
+        message: "The operation configuration is invalid.",
+        action: "Check the operation definition and try again."
       }
     },
     execution: {
       invalid_output: {
-        code: "tool.execution.invalid_output",
-        message: "The tool returned an invalid output payload.",
-        action: "Update the tool handler to return a valid JSON object."
+        code: "operation.execution.invalid_output",
+        message: "The operation returned an invalid output payload.",
+        action: "Update the operation handler to return a valid JSON object."
       }
     }
   },

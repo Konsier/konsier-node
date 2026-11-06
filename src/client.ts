@@ -24,7 +24,7 @@ import { KonsierError } from "./errors";
 import { createHandler } from "./handler";
 import { resolvePageRequest } from "./page/verify";
 import { notify } from "./notify";
-import { attachment, createTool, type Tool } from "./tool";
+import { attachment, createOperation, type Operation } from "./tool";
 import type {
   Account,
   AccountGetInput,
@@ -57,6 +57,18 @@ import type {
   PageRequestResult,
 } from "./types";
 
+const RESERVED_OPERATION_ROOTS = new Set([
+  "whoami",
+  "conversation",
+  "message",
+  "user",
+  "account",
+  "notify",
+  "attachment",
+  "status",
+  "quick-reply",
+]);
+
 function shouldDebugLog(debug: boolean): boolean {
   return debug && process.env.NODE_ENV === "development";
 }
@@ -72,7 +84,10 @@ function maskSecret(value: string): string {
   return `${normalized.slice(0, 4)}...${normalized.slice(-4)}`;
 }
 
-function normalizeEndpointUrl(raw: string | undefined): string | null {
+function normalizeHttpUrl(
+  raw: string | undefined,
+  optionName: "endpointUrl" | "publicUrl",
+): string | null {
   if (typeof raw === "undefined") {
     return null;
   }
@@ -81,7 +96,7 @@ function normalizeEndpointUrl(raw: string | undefined): string | null {
   if (!normalized) {
     const publicError = createPublicApiError({
       code: ERROR_CODES.client.configuration.endpoint_invalid,
-      message: "Konsier endpointUrl must be a valid http(s) URL.",
+      message: `Konsier ${optionName} must be a valid http(s) URL.`,
     });
     throw new KonsierError({
       code: publicError.code,
@@ -97,7 +112,7 @@ function normalizeEndpointUrl(raw: string | undefined): string | null {
   } catch {
     const publicError = createPublicApiError({
       code: ERROR_CODES.client.configuration.endpoint_invalid,
-      message: "Konsier endpointUrl must be a valid http(s) URL.",
+      message: `Konsier ${optionName} must be a valid http(s) URL.`,
     });
     throw new KonsierError({
       code: publicError.code,
@@ -110,7 +125,7 @@ function normalizeEndpointUrl(raw: string | undefined): string | null {
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
     const publicError = createPublicApiError({
       code: ERROR_CODES.client.configuration.endpoint_invalid,
-      message: "Konsier endpointUrl must use http or https.",
+      message: `Konsier ${optionName} must use http or https.`,
     });
     throw new KonsierError({
       code: publicError.code,
@@ -123,7 +138,20 @@ function normalizeEndpointUrl(raw: string | undefined): string | null {
   if (parsed.search || parsed.hash) {
     const publicError = createPublicApiError({
       code: ERROR_CODES.client.configuration.endpoint_invalid,
-      message: "Konsier endpointUrl must not include query or hash segments.",
+      message: `Konsier ${optionName} must not include query or hash segments.`,
+    });
+    throw new KonsierError({
+      code: publicError.code,
+      message: publicError.message,
+      action: publicError.action,
+      statusCode: 400,
+    });
+  }
+
+  if (optionName === "publicUrl" && parsed.pathname !== "/") {
+    const publicError = createPublicApiError({
+      code: ERROR_CODES.client.configuration.endpoint_invalid,
+      message: "Konsier publicUrl must be an origin without a path.",
     });
     throw new KonsierError({
       code: publicError.code,
@@ -225,7 +253,7 @@ export function createJsonBodyMiddleware(rawBodyProperty: string) {
 }
 
 export class Konsier {
-  static tool = createTool;
+  static operation = createOperation;
   static attachment = attachment;
   static telegram = {
     slashCommand: createTelegramSlashCommand,
@@ -257,6 +285,7 @@ export class Konsier {
   private readonly cloudClient: CloudApiClient;
   private readonly allowedClockSkewMs: number;
   private readonly endpointUrl: string | null;
+  private readonly publicUrl: string | null;
   private readonly debug: boolean;
 
   constructor(options: KonsierOptions) {
@@ -293,7 +322,8 @@ export class Konsier {
     this.internal = options.internal ?? null;
     this.projectEvents = options.events ?? {};
     this.allowedClockSkewMs = DEFAULT_ALLOWED_CLOCK_SKEW_MS;
-    this.endpointUrl = normalizeEndpointUrl(options.endpointUrl);
+    this.endpointUrl = normalizeHttpUrl(options.endpointUrl, "endpointUrl");
+    this.publicUrl = normalizeHttpUrl(options.publicUrl, "publicUrl");
     this.debug = Boolean(options.debug);
     const cloudBaseUrl = resolveCloudBaseUrl({ debug: this.debug });
 
@@ -359,8 +389,8 @@ export class Konsier {
         internalPages: this.internal && typeof this.internal !== "function"
           ? (this.internal.pages ?? []).length
           : null,
-        internalTools: this.internal && typeof this.internal !== "function"
-          ? (this.internal.tools ?? []).length
+        internalOperations: this.internal && typeof this.internal !== "function"
+          ? (this.internal.operations ?? []).length
           : null,
         telegramSlashCommands: Object.values(this.agents).reduce((count, entry) => {
           if (typeof entry === "function") return count;
@@ -402,7 +432,7 @@ export class Konsier {
       apiKey: this.apiKey,
       allowedClockSkewMs: this.allowedClockSkewMs,
       debug: this.debug,
-      handleToolCall: {
+      handleOperationInvoke: {
         debug: this.debug,
         resolveAgentConfig: (agent, account) =>
           this.resolveAgentConfig(agent, account),
@@ -447,8 +477,10 @@ export class Konsier {
   }
 
   async sync(): Promise<void> {
-    const payload =
-      this.endpointUrl === null ? {} : { endpoint_url: this.endpointUrl };
+    const payload = {
+      ...(this.endpointUrl === null ? {} : { endpoint_url: this.endpointUrl }),
+      ...(this.publicUrl === null ? {} : { public_url: this.publicUrl }),
+    };
 
     if (shouldDebugLog(this.debug)) {
       console.log("[konsier] sync requested", payload);
@@ -479,6 +511,8 @@ export class Konsier {
     agents: Record<string, {
       name: string;
       description: string | null;
+      systemPrompt: string;
+      operations: ReturnType<Konsier["manifestOperations"]>;
       events: string[];
       telegram?: {
         slashCommands: Array<{
@@ -489,11 +523,7 @@ export class Konsier {
       };
     }>;
     internal: {
-      tools: Array<{
-        name: string;
-        description: string;
-        input: Record<string, unknown>;
-      }>;
+      operations: ReturnType<Konsier["manifestOperations"]>;
       pages: Array<{ name: string; path: string }>;
     };
   }> {
@@ -511,6 +541,12 @@ export class Konsier {
             typeof resolved.description === "string" && resolved.description.trim()
               ? resolved.description.trim()
               : null,
+          systemPrompt: resolved.systemPrompt.trim(),
+          operations: this.manifestOperations(
+            resolved.operations,
+            `agent "${ref}"`,
+            500,
+          ),
           events: listRegisteredKeys(resolved.events ?? {}),
           telegram:
             resolved.telegram && (resolved.telegram.slashCommands?.length ?? 0) > 0
@@ -538,6 +574,8 @@ export class Konsier {
         {
           name: agent.name,
           description: agent.description,
+          systemPrompt: agent.systemPrompt,
+          operations: agent.operations,
           events: agent.events,
           ...(agent.telegram ? { telegram: agent.telegram } : {}),
         },
@@ -551,7 +589,11 @@ export class Konsier {
         events: listRegisteredKeys(this.projectEvents),
       },
       internal: {
-        tools: this.manifestTools(internal.tools ?? [], "internal", 500),
+        operations: this.manifestOperations(
+          internal.operations ?? [],
+          "internal",
+          500,
+        ),
         pages: this.pageDefinitions(internal.pages ?? [], "internal", 500),
       },
     };
@@ -626,7 +668,7 @@ export class Konsier {
       return;
     }
 
-    this.manifestTools(this.internal.tools ?? [], "internal", 400);
+    this.manifestOperations(this.internal.operations ?? [], "internal", 400);
     this.pageDefinitions(this.internal.pages ?? [], "internal", 400);
   }
 
@@ -696,45 +738,56 @@ export class Konsier {
       });
     }
 
-    this.manifestTools(config.tools, `agent "${agentKey}"`, statusCode);
+    this.manifestOperations(config.operations, `agent "${agentKey}"`, statusCode);
   }
 
-  private manifestTools(
-    tools: Array<Tool<any, JsonObject>>,
+  private manifestOperations(
+    operations: Array<Operation<any, JsonObject>>,
     owner: string,
     statusCode: number,
   ): Array<{
-    name: string;
+    service: string;
+    resource: string;
+    action: string;
+    title: string;
     description: string;
-    input: Record<string, unknown>;
+    inputSchema: Record<string, unknown>;
+    outputSchema: Record<string, unknown>;
+    approval: { required: boolean; bypassable: boolean };
   }> {
-    if (!Array.isArray(tools)) {
+    if (!Array.isArray(operations)) {
       throw new KonsierError({
         ...createPublicApiError({
-          code: ERROR_CODES.tool.configuration.invalid,
-          message: `${owner} tools must be an array.`,
+          code: ERROR_CODES.operation.configuration.invalid,
+          message: `${owner} operations must be an array.`,
         }),
         statusCode,
       });
     }
 
-    const keys = new Set<string>();
-    return tools.map((tool) => {
-      this.validateTool(tool, owner, statusCode);
-      if (keys.has(tool.key)) {
+    const refs = new Set<string>();
+    return operations.map((operation) => {
+      this.validateOperation(operation, owner, statusCode);
+      const ref = `${operation.service}.${operation.resource}.${operation.action}`;
+      if (refs.has(ref)) {
         throw new KonsierError({
           ...createPublicApiError({
-            code: ERROR_CODES.tool.configuration.invalid,
-            message: `${owner} contains duplicate normalized tool key "${tool.key}" from "${tool.name}".`,
+            code: ERROR_CODES.operation.configuration.invalid,
+            message: `${owner} contains duplicate operation "${ref}".`,
           }),
           statusCode,
         });
       }
-      keys.add(tool.key);
+      refs.add(ref);
       return {
-        name: tool.key,
-        description: tool.description,
-        input: tool.inputSchema,
+        service: operation.service,
+        resource: operation.resource,
+        action: operation.action,
+        title: operation.title,
+        description: operation.description,
+        inputSchema: operation.inputSchema,
+        outputSchema: operation.outputSchema,
+        approval: operation.approval,
       };
     });
   }
@@ -786,49 +839,55 @@ export class Konsier {
     });
   }
 
-  private validateTool(
-    tool: Tool<any, JsonObject>,
+  private validateOperation(
+    operation: Operation<any, JsonObject>,
     owner: string,
     statusCode: number,
   ): void {
-    if (!tool || typeof tool !== "object") {
+    if (!operation || typeof operation !== "object") {
       throw new KonsierError({
         ...createPublicApiError({
-          code: ERROR_CODES.tool.configuration.invalid,
-          message: `${owner} contains an invalid tool entry.`,
-        }),
-        statusCode,
-      });
-    }
-
-    if (!tool.name || typeof tool.name !== "string") {
-      throw new KonsierError({
-        ...createPublicApiError({
-          code: ERROR_CODES.tool.configuration.invalid,
-          message: `${owner} includes a tool with no name.`,
-        }),
-        statusCode,
-      });
-    }
-
-    if (!tool.key || typeof tool.key !== "string") {
-      throw new KonsierError({
-        ...createPublicApiError({
-          code: ERROR_CODES.tool.configuration.invalid,
-          message: `${owner} includes a tool with no normalized key.`,
+          code: ERROR_CODES.operation.configuration.invalid,
+        message: `${owner} contains an invalid operation entry.`,
         }),
         statusCode,
       });
     }
 
     if (
-      typeof tool.handler !== "function" ||
-      typeof tool.parseInput !== "function"
+      !operation.service ||
+      !operation.resource ||
+      !operation.action ||
+      !operation.title
     ) {
       throw new KonsierError({
         ...createPublicApiError({
-          code: ERROR_CODES.tool.configuration.invalid,
-          message: `Tool "${tool.name}" is not a valid Konsier tool. Use Konsier.tool({...}).`,
+          code: ERROR_CODES.operation.configuration.invalid,
+          message: `${owner} includes an operation with incomplete identity.`,
+        }),
+        statusCode,
+      });
+    }
+
+    if (RESERVED_OPERATION_ROOTS.has(operation.service)) {
+      throw new KonsierError({
+        ...createPublicApiError({
+          code: ERROR_CODES.operation.configuration.invalid,
+          message: `Operation root "${operation.service}" is reserved by the Konsier runtime.`,
+        }),
+        statusCode,
+      });
+    }
+
+    if (
+      typeof operation.handler !== "function" ||
+      typeof operation.parseInput !== "function" ||
+      typeof operation.parseOutput !== "function"
+    ) {
+      throw new KonsierError({
+        ...createPublicApiError({
+          code: ERROR_CODES.operation.configuration.invalid,
+          message: `Operation "${operation.service}.${operation.resource}.${operation.action}" is invalid. Use Konsier.operation({...}).`,
         }),
         statusCode,
       });

@@ -14,7 +14,7 @@
     "express": "^5.1.0",
     "konsier": "file:../..",
     "vitest": "^4.0.18",
-    "zod": "^4.3.6"
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/express": "^5.0.3",

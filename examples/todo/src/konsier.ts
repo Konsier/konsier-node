@@ -12,7 +12,12 @@ import {
 } from "./state";
 
 const apiKey = process.env.KONSIER_API_KEY ?? "";
-const endpointUrl = `http://localhost:${process.env.PORT ?? "3002"}/konsier`;
+const endpointUrl =
+  process.env.KONSIER_ENDPOINT_URL ??
+  `http://localhost:${process.env.PORT ?? "3002"}/konsier`;
+const publicUrl =
+  process.env.KONSIER_PUBLIC_URL ??
+  `http://localhost:${process.env.PORT ?? "3002"}`;
 
 function toAttachment(
   attachment: NonNullable<z.infer<typeof addTaskToolInput.shape.attachment>>,
@@ -54,10 +59,14 @@ function toAttachment(
   };
 }
 
-const listTasksTool = Konsier.tool({
-  name: "List Tasks",
+const listTasksTool = Konsier.operation({
+  service: "app",
+  resource: "operations",
+  action: "list_tasks",
+  title: "List Tasks",
   description: "List current tasks and completion state.",
   input: z.object({ showCompleted: z.boolean().default(true) }),
+  output: z.record(z.string(), z.any()),
   handler: async (input, ctx) => {
     const tasks = listTasks().filter((task) =>
       input.showCompleted ? true : !task.done,
@@ -88,10 +97,14 @@ const addTaskToolInput = z.object({
     ),
 });
 
-const addTaskTool = Konsier.tool({
-  name: "Add Task",
+const addTaskTool = Konsier.operation({
+  service: "app",
+  resource: "operations",
+  action: "add_task",
+  title: "Add Task",
   description: "Create a new task in the in-memory board.",
   input: addTaskToolInput,
+  output: z.record(z.string(), z.any()),
   handler: async (input, ctx) => {
     const task = addTask({
       title: input.title,
@@ -114,11 +127,15 @@ const taskReferenceSchema = z
     "Prefer the exact task id such as task_4 from prior tool results. If an id is unavailable, pass a short distinctive task title or slug.",
   );
 
-const getTaskDetailsTool = Konsier.tool({
-  name: "Get Task Details",
+const getTaskDetailsTool = Konsier.operation({
+  service: "app",
+  resource: "operations",
+  action: "get_task_details",
+  title: "Get Task Details",
   description:
     "Return details for one task and resend any attachments saved on it.",
   input: z.object({ taskId: taskReferenceSchema }),
+  output: z.record(z.string(), z.any()),
   handler: async (input, ctx) => {
     const task = getTask(input.taskId);
     if (!task) {
@@ -151,10 +168,15 @@ const getTaskDetailsTool = Konsier.tool({
   },
 });
 
-const completeTaskTool = Konsier.tool({
-  name: "Complete Task",
+const completeTaskTool = Konsier.operation({
+  service: "app",
+  resource: "operations",
+  action: "complete_task",
+  title: "Complete Task",
   description: "Mark a task as completed.",
   input: z.object({ taskId: taskReferenceSchema }),
+  output: z.record(z.string(), z.any()),
+  approval: { required: true, bypassable: true },
   handler: async (input) => {
     const task = completeTask(input.taskId);
     if (!task) {
@@ -165,10 +187,15 @@ const completeTaskTool = Konsier.tool({
   },
 });
 
-const deleteTaskTool = Konsier.tool({
-  name: "Delete Task",
+const deleteTaskTool = Konsier.operation({
+  service: "app",
+  resource: "operations",
+  action: "delete_task",
+  title: "Delete Task",
   description: "Delete a task from the list.",
   input: z.object({ taskId: taskReferenceSchema }),
+  output: z.record(z.string(), z.any()),
+  approval: { required: true, bypassable: false },
   handler: async (input) => {
     const deleted = deleteTask(input.taskId);
     if (!deleted) {
@@ -182,6 +209,7 @@ const deleteTaskTool = Konsier.tool({
 export const konsier = new Konsier({
   apiKey,
   endpointUrl,
+  publicUrl,
   debug: true,
   agents: {
     todo_assistant: {
@@ -189,7 +217,7 @@ export const konsier = new Konsier({
       description: "Tracks a compact todo list for demos.",
       systemPrompt:
         "You manage a lightweight task board. Use tools to read or modify tasks before responding. Always prefer exact task ids like task_4 from prior tool outputs when calling task detail, complete, or delete tools. If the user only gives a title, pass the clearest short task title or slug. If a task should include an uploaded file, photo, audio clip, video, or location, pass it explicitly in the Add Task tool's attachment field instead of assuming the latest message attachment. When task details include attachments, let the user know they are included in the response, but do not repeat internal attachment transcript markers.",
-      tools: [
+      operations: [
         listTasksTool,
         addTaskTool,
         getTaskDetailsTool,

@@ -9,7 +9,7 @@ describe("pageRequest", () => {
     agents: {
       customer: {
         systemPrompt: "Support",
-        tools: [],
+        operations: [],
       },
     },
   });

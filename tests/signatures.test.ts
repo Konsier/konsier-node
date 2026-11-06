@@ -7,7 +7,7 @@ describe("signatures", () => {
   it("verifies a valid signature", () => {
     const apiKey = "k_test_123";
     const timestamp = Date.now().toString();
-    const payload = JSON.stringify({ type: "tool_call" });
+    const payload = JSON.stringify({ type: "operation_invoke" });
     const signature = createKonsierSignature({ apiKey, timestamp, payload });
 
     const result = verifyKonsierSignature({
@@ -24,7 +24,7 @@ describe("signatures", () => {
     const apiKey = "k_test_123";
     const nowMs = Date.now();
     const timestamp = String(nowMs - 10 * 60 * 1000);
-    const payload = JSON.stringify({ type: "tool_call" });
+    const payload = JSON.stringify({ type: "operation_invoke" });
     const signature = createKonsierSignature({ apiKey, timestamp, payload });
 
     const result = verifyKonsierSignature({

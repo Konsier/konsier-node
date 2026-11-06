@@ -6,11 +6,11 @@ Public storefront rendered with Next.js and hosted by a Hono server.
 
 - Hono + Next.js in one process
 - One public agent ref: `shopping_assistant`
-- Tool handlers using `ctx.messages`, `ctx.attach(...)`, and `return ctx.end(...)`
+- Operation handlers using `ctx.messages`, `ctx.attach(...)`, and regular return values
 - Two protected owner pages launched from Konsier:
   - `/pages/catalog`
   - `/pages/orders`
-- Internal owner tools for catalog management
+- Internal owner operations for catalog management
 - In-memory products, carts, and quotes
 - `sdk.sync()` runs automatically when the server boots
 
@@ -37,4 +37,4 @@ Open [http://localhost:3003](http://localhost:3003) for the public storefront.
 - `Show me the Oak Lantern`
   This exercises `ctx.messages` and `ctx.attach(...)`. The tool returns product data and queues a demo image for the assistant reply.
 - `Show me photos of the Oak Lantern`
-  This exercises `return ctx.end(...)`. The tool returns a terminal message with demo attachments so the model can stop after the tool response.
+  This exercises an operation result with demo attachments; the agent then produces its normal final response.

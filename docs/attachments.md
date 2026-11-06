@@ -2,21 +2,25 @@
 
 Konsier supports attachments in two main places:
 
-- tool inputs via `Konsier.attachment.*()`
+- operation inputs via `Konsier.attachment.*()`
 - outbound messages via `AttachInput`
 
-## Attachment-Aware Tool Inputs
+## Attachment-Aware Operation Inputs
 
-Use attachment schema helpers in your tool input definitions.
+Use attachment schema helpers in your operation input definitions.
 
 ```ts
-const addReceipt = Konsier.tool({
-  name: "Add Receipt",
+const addReceipt = Konsier.operation({
+  service: "expenses",
+  resource: "receipts",
+  action: "add",
+  title: "Add Receipt",
   description: "Store an uploaded receipt.",
   input: z.object({
     title: z.string().min(1),
     receipt: Konsier.attachment.image().optional(),
   }),
+  output: z.object({ title: z.string(), hasReceipt: z.boolean() }),
   handler: async (input) => {
     return {
       title: input.title,
@@ -46,7 +50,7 @@ ctx.attach({
 });
 ```
 
-You can also send attachments with `ctx.end(...)` or `conversation.sendMessage(...)`.
+You can also send attachments with `conversation.sendMessage(...)`.
 
 ## AttachInput
 

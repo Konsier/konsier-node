@@ -65,7 +65,7 @@ async function promptApiKey(): Promise<string> {
         message: "Konsier API key",
         placeholder: "ks_live_...",
         validate(value) {
-          return value.trim().startsWith("ks_")
+          return value?.trim().startsWith("ks_")
             ? undefined
             : "Enter a valid Konsier API key.";
         },
@@ -101,7 +101,7 @@ async function promptTelegramSetup(
         message: "Telegram bot token",
         placeholder: "123456:ABC...",
         validate(value) {
-          return value.trim() ? undefined : "Telegram bot token is required.";
+          return value?.trim() ? undefined : "Telegram bot token is required.";
         },
       }),
     ).trim();
@@ -132,7 +132,7 @@ async function promptInitAnswers(): Promise<InitAnswers> {
         message: "Project name",
         placeholder: "my-bot",
         validate(value) {
-          return value.trim() ? undefined : "Project name is required.";
+          return value?.trim() ? undefined : "Project name is required.";
         },
       }),
     ),
@@ -155,7 +155,7 @@ async function promptInitAnswers(): Promise<InitAnswers> {
       message: "Public app URL",
       placeholder: "https://your-public-url",
       validate(value) {
-        const normalized = value.trim();
+        const normalized = value?.trim() ?? "";
         if (!normalized) {
           return "Public app URL is required.";
         }
@@ -235,11 +235,13 @@ async function scaffoldProject(input: {
     ".env": envTemplate({
       apiKey: input.answers.apiKey,
       endpointUrl,
+      publicUrl: input.answers.appBaseUrl,
       port: input.answers.port,
       database: input.answers.database,
     }),
     ".env.example": envExampleTemplate({
       endpointUrl,
+      publicUrl: input.answers.appBaseUrl,
       port: input.answers.port,
       database: input.answers.database,
     }),
@@ -255,6 +257,7 @@ async function scaffoldProject(input: {
       framework: input.answers.framework,
       database: input.answers.database,
       endpointUrl,
+      publicUrl: input.answers.appBaseUrl,
       projectNameResolved: input.project.name,
       telegramBotUsername: input.answers.telegramBotUsername,
     }),

@@ -53,8 +53,8 @@ export type {
   TelegramSlashCommandContext,
   TelegramSlashCommandDefinition,
   TelegramSlashCommandResult,
-  ToolMessage,
-  ToolContext,
+  OperationMessage,
+  OperationContext,
   UserGetInput,
   UserLinkInput,
   VideoAttachment,
@@ -98,14 +98,15 @@ export type {
   SdkHandlerRequest,
   SlashCommandRequest,
   SlashCommandResponse,
-  ToolCallRequest,
-  ToolCallResponse,
+  OperationInvokeRequest,
+  OperationInvokeResponse,
 } from "./protocol/inbound";
 
 export type {
-  Tool,
-  ToolDefinition,
-  ToolInputSchema,
+  Operation,
+  OperationDefinition,
+  OperationSchema,
+  OperationApproval,
   AttachmentSchema,
   AttachmentSchemaValue,
 } from "./tool";

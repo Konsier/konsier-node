@@ -60,5 +60,5 @@ The root package exports protocol request and response types used by the webhook
 - `SdkHandlerRequest`
 - `SlashCommandRequest`
 - `SlashCommandResponse`
-- `ToolCallRequest`
-- `ToolCallResponse`
+- `OperationInvokeRequest`
+- `OperationInvokeResponse`

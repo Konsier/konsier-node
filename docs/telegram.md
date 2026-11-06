@@ -11,16 +11,16 @@ const konsier = new Konsier({
   agents: {
     support_bot: {
       systemPrompt: "Handle support conversations.",
-      tools: [lookupTicketTool],
+      operations: [lookupTicketOperation],
       telegram: {
         slashCommands: [
           Konsier.telegram.slashCommand({
             command: "status",
             description: "Show account status",
             handler: async (ctx) => {
-              return ctx.end({
+              return {
                 text: `Signed in as ${ctx.user.displayName ?? ctx.user.id}.`,
-              });
+              };
             },
           }),
         ],
@@ -44,10 +44,9 @@ type TelegramSlashCommandContext = {
   };
   user: EndUser;
   conversation: Conversation;
-  messages: ToolMessage[];
+  messages: OperationMessage[];
   account: Account | null;
-  end: (message?: SendMessage) => EndSignal;
 };
 ```
 
-Use `ctx.end(...)` when the command should return the full user-facing response.
+Return a `SendMessage` when the slash command should produce a user-facing response.

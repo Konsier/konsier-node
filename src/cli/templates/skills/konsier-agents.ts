@@ -14,7 +14,7 @@ Use a plain object when behavior is mostly fixed:
 - \`name\`
 - \`description\`
 - \`systemPrompt\`
-- \`tools\`
+- \`operations\`
 - optional \`events\`
 
 ## Dynamic Agents
@@ -29,7 +29,7 @@ Keep instructions in this order:
 
 1. Role and objective
 2. Success criteria
-3. Tool policy
+3. Operation policy
 4. Edge cases
 5. Tone and formatting
 

@@ -4,8 +4,8 @@ import { KonsierError } from "../errors";
 import type {
   InboundAccount,
   InboundUser,
-  ToolCallRequest,
-  ToolCallResponse,
+  OperationInvokeRequest,
+  OperationInvokeResponse,
 } from "../protocol/inbound";
 import type {
   Account,
@@ -13,17 +13,15 @@ import type {
   AgentConfig,
   Attachment,
   AttachmentType,
-  EndSignal,
   EndUser,
   InternalDefinition,
   JsonObject,
   QuotedMessage,
-  SendMessage,
-  ToolMessage,
-  ToolContext,
+  OperationMessage,
+  OperationContext,
 } from "../types";
 
-const CHANNELS = new Set<ToolCallRequest["channel"]>([
+const CHANNELS = new Set<OperationInvokeRequest["channel"]>([
   "telegram",
   "slack",
   "discord",
@@ -33,16 +31,16 @@ const CHANNELS = new Set<ToolCallRequest["channel"]>([
   "konsier",
 ]);
 
-export interface ToolCallDependencies {
+export interface OperationInvokeDependencies {
   debug?: boolean;
   resolveAgentConfig: (
     agent: string,
     account: Account | null,
   ) => Promise<AgentConfig>;
-  resolveInternalDefinition: (account: Account | null) => Promise<InternalDefinition>;
+  resolveInternalDefinition: (
+    account: Account | null,
+  ) => Promise<InternalDefinition>;
 }
-
-const TOOL_CONTROL_FIELD = "__konsier";
 
 type SerializedAttachInput =
   | {
@@ -70,21 +68,35 @@ type SerializedAttachInput =
       address?: string;
     };
 
-export function asToolCallRequest(payload: unknown): ToolCallRequest | null {
+export function asOperationInvokeRequest(
+  payload: unknown,
+): OperationInvokeRequest | null {
   const obj = asObject(payload);
-  if (!obj || obj.type !== "tool_call") {
+  if (!obj || obj.type !== "operation_invoke") {
     return null;
   }
 
   const target = parseTarget(obj.target);
   const channel = parseChannel(obj.channel);
   const conversation = parseConversation(obj.conversation);
-  const messages = parseMessages(obj.messages, obj.message);
-  const tool = parseTool(obj.tool);
+  const messages = parseMessages(obj.messages);
+  const operation = parseOperation(obj.operation);
+  const input = asObject(obj.input);
+  const idempotencyKey = parseIdentifier(obj.idempotency_key);
+  const attemptId = parseIdentifier(obj.attempt_id);
   const account = parseInboundAccount(obj.account);
   const user = parseInboundUser(obj.user);
 
-  if (!target || !channel || !conversation || !messages || !tool) {
+  if (
+    !target ||
+    !channel ||
+    !conversation ||
+    !messages ||
+    !operation ||
+    !input ||
+    !idempotencyKey ||
+    !attemptId
+  ) {
     return null;
   }
 
@@ -97,31 +109,42 @@ export function asToolCallRequest(payload: unknown): ToolCallRequest | null {
   }
 
   return {
-    type: "tool_call",
+    type: "operation_invoke",
     conversation,
     messages,
     channel,
     target,
-    tool,
+    operation,
+    idempotency_key: idempotencyKey,
+    attempt_id: attemptId,
+    ...(typeof obj.bypass_approval_reason === "string" &&
+    obj.bypass_approval_reason.trim()
+      ? { bypass_approval_reason: obj.bypass_approval_reason.trim() }
+      : {}),
+    input,
     account,
     user,
   };
 }
 
-export async function executeToolCallRequest(
-  request: ToolCallRequest,
-  dependencies: ToolCallDependencies,
-): Promise<ToolCallResponse> {
+export async function executeOperationInvokeRequest(
+  request: OperationInvokeRequest,
+  dependencies: OperationInvokeDependencies,
+): Promise<OperationInvokeResponse> {
   const debug = Boolean(dependencies.debug);
   const account = normalizeAccount(request.account);
-  const resolvedTool = await resolveTool(request, dependencies, account);
-  const parsedInput = resolvedTool.parseInput(request.tool.input);
+  const resolvedOperation = await resolveOperation(
+    request,
+    dependencies,
+    account,
+  );
+  const parsedInput = resolvedOperation.parseInput(request.input);
   const user = normalizeUser(request.user);
   const queuedAttachments: AttachInput[] = [];
 
-  debugLog(debug, "tool execution started", {
+  debugLog(debug, "operation execution started", {
     target: request.target,
-    tool: request.tool.name,
+    operation: request.operation,
     input: parsedInput,
     conversationId: request.conversation.id,
     channel: request.channel,
@@ -129,7 +152,7 @@ export async function executeToolCallRequest(
     user,
   });
 
-  const context: ToolContext = {
+  const context: OperationContext = {
     channel: request.channel,
     agent: request.target.type === "agent" ? request.target.agent : "internal",
     user,
@@ -140,22 +163,24 @@ export async function executeToolCallRequest(
     },
     messages: request.messages,
     account,
+    idempotencyKey: request.idempotency_key,
+    attemptId: request.attempt_id,
     attach: (input) => {
       const items = Array.isArray(input) ? input : [input];
       queuedAttachments.push(...items);
     },
-    end: (message) => ({
-      __konsierEnd: true,
-      ...(message ? { message } : {}),
-    }),
   };
 
   try {
-    const result = await resolvedTool.handler(parsedInput, context);
-    const output = buildToolCallResponse(result, queuedAttachments);
-    debugLog(debug, "tool execution succeeded", {
+    const result = await resolvedOperation.handler(parsedInput, context);
+    const validatedOutput = resolvedOperation.parseOutput(result);
+    const output = buildOperationInvokeResponse(
+      validatedOutput,
+      queuedAttachments,
+    );
+    debugLog(debug, "operation execution succeeded", {
       target: request.target,
-      tool: request.tool.name,
+      operation: request.operation,
       input: parsedInput,
       output,
       conversationId: request.conversation.id,
@@ -163,9 +188,9 @@ export async function executeToolCallRequest(
     });
     return output;
   } catch (error) {
-    debugLog(debug, "tool execution failed", {
+    debugLog(debug, "operation execution failed", {
       target: request.target,
-      tool: request.tool.name,
+      operation: request.operation,
       input: parsedInput,
       conversationId: request.conversation.id,
       channel: request.channel,
@@ -176,109 +201,74 @@ export async function executeToolCallRequest(
   }
 }
 
-async function resolveTool(
-  request: ToolCallRequest,
-  dependencies: ToolCallDependencies,
+async function resolveOperation(
+  request: OperationInvokeRequest,
+  dependencies: OperationInvokeDependencies,
   account: Account | null,
 ) {
   if (request.target.type === "agent") {
-    const agent = await dependencies.resolveAgentConfig(request.target.agent, account);
-    const tool = agent.tools.find((entry) => entry.key === request.tool.name);
-    if (!tool) {
+    const agent = await dependencies.resolveAgentConfig(
+      request.target.agent,
+      account,
+    );
+    const operation = agent.operations.find(
+      (entry) =>
+        entry.service === request.operation.service &&
+        entry.resource === request.operation.resource &&
+        entry.action === request.operation.action,
+    );
+    if (!operation) {
       throw new KonsierError({
         ...createPublicApiError({
-          code: ERROR_CODES.tool.resource.not_found,
-          message: `Tool "${request.tool.name}" is not registered for agent "${request.target.agent}".`,
+          code: ERROR_CODES.operation.resource.not_found,
+          message: `Operation "${operationRef(request)}" is not registered for agent "${request.target.agent}".`,
         }),
         statusCode: 404,
       });
     }
-    return tool;
+    return operation;
   }
 
   const internal = await dependencies.resolveInternalDefinition(account);
-  const tool = (internal.tools ?? []).find((entry) => entry.key === request.tool.name);
-  if (!tool) {
+  const operation = (internal.operations ?? []).find(
+    (entry) =>
+      entry.service === request.operation.service &&
+      entry.resource === request.operation.resource &&
+      entry.action === request.operation.action,
+  );
+  if (!operation) {
     throw new KonsierError({
       ...createPublicApiError({
-        code: ERROR_CODES.tool.resource.not_found,
-        message: `Internal tool "${request.tool.name}" is not registered.`,
+        code: ERROR_CODES.operation.resource.not_found,
+        message: `Internal operation "${operationRef(request)}" is not registered.`,
       }),
       statusCode: 404,
     });
   }
 
-  return tool;
+  return operation;
 }
 
-function buildToolCallResponse(
-  output: unknown,
+function buildOperationInvokeResponse(
+  output: JsonObject,
   queuedAttachments: AttachInput[],
-): JsonObject {
-  const end = asEndSignal(output);
-  if (!end && (!output || typeof output !== "object" || Array.isArray(output))) {
-    throw new KonsierError({
-      ...createPublicApiError({
-        code: ERROR_CODES.tool.execution.invalid_output,
-        message:
-          "Tool handlers must return a JSON object or return ctx.end(...).",
-      }),
-      statusCode: 500,
-    });
-  }
-
-  const endMessage = end?.message;
-  const result = end ? serializeEndMessage(endMessage) : { ...(output as JsonObject) };
-  const attachments = [
-    ...queuedAttachments,
-    ...(endMessage?.attachments ?? []),
-  ];
-  if (attachments.length === 0 && !end) {
-    return result;
-  }
-
+): OperationInvokeResponse {
   return {
-    ...result,
-    [TOOL_CONTROL_FIELD]: {
-      end: Boolean(end),
-      attachments: serializeAttachments(attachments),
-    },
+    ok: true,
+    output,
+    ...(queuedAttachments.length > 0
+      ? { attachments: serializeAttachments(queuedAttachments) }
+      : {}),
   };
 }
 
-function asEndSignal(value: unknown): EndSignal | null {
-  if (
-    !value ||
-    typeof value !== "object" ||
-    Array.isArray(value) ||
-    !("__konsierEnd" in value) ||
-    (value as { __konsierEnd?: unknown }).__konsierEnd !== true
-  ) {
-    return null;
-  }
-
-  return value as EndSignal;
+function operationRef(request: OperationInvokeRequest): string {
+  return `${request.operation.service}.${request.operation.resource}.${request.operation.action}`;
 }
 
-function serializeEndMessage(message: SendMessage | undefined): JsonObject {
-  if (!message) {
-    return {};
-  }
-
-  const result: JsonObject = {};
-  if (typeof message.text === "string" && message.text.trim().length > 0) {
-    result.text = message.text;
-  }
-  if (Array.isArray(message.quickReplies) && message.quickReplies.length > 0) {
-    result.quickReplies = message.quickReplies.map((reply) => ({
-      label: reply.label,
-      value: reply.value,
-    }));
-  }
-  return result;
-}
-
-function serializeAttachments(attachments: AttachInput[]): SerializedAttachInput[] {
+function serializeAttachments(
+  attachments: AttachInput[],
+): SerializedAttachInput[] {
   return attachments.map((attachment) => {
     if ("attachmentId" in attachment) {
       return { attachmentId: attachment.attachmentId };
@@ -359,7 +349,7 @@ function debugLog(
     return;
   }
   const payload = meta ? { message, ...meta } : { message };
-  console.log("[konsier] tool_call", serializeForLog(payload));
+  console.log("[konsier] operation_invoke", serializeForLog(payload));
 }
 
 function serializeForLog(value: unknown): string {
@@ -378,7 +368,7 @@ function asObject(value: unknown): Record<string, unknown> | null {
   return value as Record<string, unknown>;
 }
 
-function parseTarget(value: unknown): ToolCallRequest["target"] | null {
+function parseTarget(value: unknown): OperationInvokeRequest["target"] | null {
   const obj = asObject(value);
   if (!obj || typeof obj.type !== "string") {
     return null;
@@ -388,7 +378,11 @@ function parseTarget(value: unknown): ToolCallRequest["target"] | null {
     return { type: "internal" };
   }
 
-  if (obj.type === "agent" && typeof obj.agent === "string" && obj.agent.trim()) {
+  if (
+    obj.type === "agent" &&
+    typeof obj.agent === "string" &&
+    obj.agent.trim()
+  ) {
     return {
       type: "agent",
       agent: obj.agent.trim(),
@@ -398,16 +392,21 @@ function parseTarget(value: unknown): ToolCallRequest["target"] | null {
   return null;
 }
 
-function parseChannel(value: unknown): ToolCallRequest["channel"] | null {
-  if (typeof value !== "string" || !CHANNELS.has(value as ToolCallRequest["channel"])) {
+function parseChannel(
+  value: unknown,
+): OperationInvokeRequest["channel"] | null {
+  if (
+    typeof value !== "string" ||
+    !CHANNELS.has(value as OperationInvokeRequest["channel"])
+  ) {
     return null;
   }
-  return value as ToolCallRequest["channel"];
+  return value as OperationInvokeRequest["channel"];
 }
 
 function parseConversation(
   value: unknown,
-): ToolCallRequest["conversation"] | null {
+): OperationInvokeRequest["conversation"] | null {
   const obj = asObject(value);
   if (!obj) {
     return null;
@@ -438,12 +437,9 @@ function parseConversation(
   };
 }
 
-function parseMessages(
-  value: unknown,
-  legacyValue: unknown,
-): ToolCallRequest["messages"] | null {
+function parseMessages(value: unknown): OperationInvokeRequest["messages"] | null {
   if (Array.isArray(value)) {
-    const messages: ToolMessage[] = [];
+    const messages: OperationMessage[] = [];
     for (const item of value) {
       const parsed = parseMessage(item);
       if (!parsed) {
@@ -458,15 +454,10 @@ function parseMessages(
     return null;
   }
 
-  if (legacyValue === undefined || legacyValue === null) {
-    return [];
-  }
-
-  const legacyMessage = parseMessage(legacyValue);
-  return legacyMessage ? [legacyMessage] : null;
+  return [];
 }
 
-function parseMessage(value: unknown): ToolMessage | null {
+function parseMessage(value: unknown): OperationMessage | null {
   const obj = asObject(value);
   if (!obj) {
     return null;
@@ -481,7 +472,7 @@ function parseMessage(value: unknown): ToolMessage | null {
     return null;
   }
 
-  const normalized: ToolMessage = {
+  const normalized: OperationMessage = {
     sentAt:
       typeof sentAt === "string" && sentAt.trim()
         ? sentAt
@@ -558,7 +549,9 @@ function parseAttachments(value: unknown): Attachment[] | null {
       url: record.url,
       type: record.type as Exclude<AttachmentType, "location">,
       ...(typeof record.name === "string" ? { name: record.name } : {}),
-      ...(typeof record.caption === "string" ? { caption: record.caption } : {}),
+      ...(typeof record.caption === "string"
+        ? { caption: record.caption }
+        : {}),
       ...(typeof record.mimeType === "string"
         ? { mimeType: record.mimeType }
         : {}),
@@ -574,7 +567,7 @@ function parseAttachments(value: unknown): Attachment[] | null {
   return attachments;
 }
 
-function parseReplyContext(value: unknown): ToolMessage["replyTo"] | null {
+function parseReplyContext(value: unknown): OperationMessage["replyTo"] | null {
   if (value === null) {
     return null;
   }
@@ -601,7 +594,11 @@ function parseReplyContext(value: unknown): ToolMessage["replyTo"] | null {
 
 function parseQuotedMessage(value: unknown): QuotedMessage | null {
   const obj = asObject(value);
-  if (!obj || typeof obj.messageId !== "string" || typeof obj.role !== "string") {
+  if (
+    !obj ||
+    typeof obj.messageId !== "string" ||
+    typeof obj.role !== "string"
+  ) {
     return null;
   }
 
@@ -641,27 +638,34 @@ function parseQuotedMessage(value: unknown): QuotedMessage | null {
   };
 }
 
-function parseTool(value: unknown): ToolCallRequest["tool"] | null {
+function parseOperation(
+  value: unknown,
+): OperationInvokeRequest["operation"] | null {
   const obj = asObject(value);
   if (!obj) {
     return null;
   }
 
-  const name = obj.name;
-  const input = obj.input;
-
-  if (typeof name !== "string") {
-    return null;
-  }
-
-  if (!input || typeof input !== "object" || Array.isArray(input)) {
+  if (
+    typeof obj.service !== "string" ||
+    typeof obj.resource !== "string" ||
+    typeof obj.action !== "string" ||
+    !obj.service.trim() ||
+    !obj.resource.trim() ||
+    !obj.action.trim()
+  ) {
     return null;
   }
 
   return {
-    name,
-    input: input as Record<string, unknown>,
+    service: obj.service.trim(),
+    resource: obj.resource.trim(),
+    action: obj.action.trim(),
   };
+}
+
+function parseIdentifier(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
 function parseInboundAccount(value: unknown): InboundAccount | null {
@@ -724,12 +728,10 @@ function parseInboundUser(value: unknown): InboundUser | null {
     return null;
   }
 
-  if (
-    !(
-      metadata === null ||
-      (typeof metadata === "object" && !Array.isArray(metadata))
-    )
-  ) {
+  if (!(
+    metadata === null ||
+    (typeof metadata === "object" && !Array.isArray(metadata))
+  )) {
     return null;
   }
 

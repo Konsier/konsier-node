@@ -9,13 +9,14 @@ import { Konsier } from "konsier";
 export const konsier = new Konsier({
   apiKey: process.env.KONSIER_API_KEY!,
   endpointUrl: process.env.KONSIER_ENDPOINT_URL!,
+  publicUrl: process.env.KONSIER_PUBLIC_URL!,
   agents: {
     assistant: {
       name: "Assistant",
       description: "Replace this placeholder agent with your real app behavior.",
       systemPrompt:
         "You are a placeholder agent. Replace this with your real Konsier app instructions.",
-      tools: [],
+      operations: [],
     },
   },
 });
@@ -57,13 +58,14 @@ import { Konsier } from "konsier";
 export const konsier = new Konsier({
   apiKey: process.env.KONSIER_API_KEY!,
   endpointUrl: process.env.KONSIER_ENDPOINT_URL!,
+  publicUrl: process.env.KONSIER_PUBLIC_URL!,
   agents: {
     assistant: {
       name: "Assistant",
       description: "Replace this placeholder agent with your real app behavior.",
       systemPrompt:
         "You are a placeholder agent. Replace this with your real Konsier app instructions.",
-      tools: [],
+      operations: [],
     },
   },
 });
@@ -105,13 +107,14 @@ import { Konsier } from "konsier";
 export const konsier = new Konsier({
   apiKey: process.env.KONSIER_API_KEY!,
   endpointUrl: process.env.KONSIER_ENDPOINT_URL!,
+  publicUrl: process.env.KONSIER_PUBLIC_URL!,
   agents: {
     assistant: {
       name: "Assistant",
       description: "Replace this placeholder agent with your real app behavior.",
       systemPrompt:
         "You are a placeholder agent. Replace this with your real Konsier app instructions.",
-      tools: [],
+      operations: [],
     },
   },
 });
@@ -152,13 +155,14 @@ import { Konsier } from "konsier";
 export const konsier = new Konsier({
   apiKey: process.env.KONSIER_API_KEY!,
   endpointUrl: process.env.KONSIER_ENDPOINT_URL!,
+  publicUrl: process.env.KONSIER_PUBLIC_URL!,
   agents: {
     assistant: {
       name: "Assistant",
       description: "Replace this placeholder agent with your real app behavior.",
       systemPrompt:
         "You are a placeholder agent. Replace this with your real Konsier app instructions.",
-      tools: [],
+      operations: [],
     },
   },
 });

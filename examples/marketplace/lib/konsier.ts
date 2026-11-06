@@ -55,13 +55,17 @@ function toProductAttachments(product: { name: string; imagePath?: string }) {
   ] satisfies AttachInput[];
 }
 
-const searchProductsTool = Konsier.tool({
-  name: "Search Products",
+const searchProductsTool = Konsier.operation({
+  service: "app",
+  resource: "operations",
+  action: "search_products",
+  title: "Search Products",
   description: "Search the public catalog for available products.",
   input: z.object({
     query: z.string().optional(),
     category: z.string().optional(),
   }),
+  output: z.record(z.string(), z.any()),
   handler: async (input) => {
     return {
       products: searchProducts(input),
@@ -69,35 +73,23 @@ const searchProductsTool = Konsier.tool({
   },
 });
 
-const viewProductTool = Konsier.tool({
-  name: "View Product",
+const viewProductTool = Konsier.operation({
+  service: "app",
+  resource: "operations",
+  action: "view_product",
+  title: "View Product",
   description: "Load detailed information for one product.",
   input: z.object({
     productId: z.string().min(1),
   }),
+  output: z.record(z.string(), z.any()),
   handler: async (input, ctx) => {
     const product = getProduct(input.productId);
     if (!product) {
       throw new Error(`Product "${input.productId}" was not found.`);
     }
 
-    // const latestMessage = ctx.messages.at(-1)?.text?.toLowerCase() ?? "";
-    // const wantsPhotos = [
-    //   "photo",
-    //   "photos",
-    //   "image",
-    //   "images",
-    //   "picture",
-    //   "pictures",
-    // ].some((keyword) => latestMessage.includes(keyword));
     const attachments = toProductAttachments(product);
-
-    // if (attachments.length > 0 && wantsPhotos) {
-    //   return ctx.end({
-    //     text: `${product.name} is $${product.price}. Here are a few product photos.`,
-    //     attachments,
-    //   });
-    // }
 
     if (attachments.length > 0) {
       ctx.attach(attachments);
@@ -112,13 +104,17 @@ const viewProductTool = Konsier.tool({
   },
 });
 
-const addToCartTool = Konsier.tool({
-  name: "Add To Cart",
+const addToCartTool = Konsier.operation({
+  service: "app",
+  resource: "operations",
+  action: "add_to_cart",
+  title: "Add To Cart",
   description: "Add a product to the current shopper cart.",
   input: z.object({
     productId: z.string().min(1),
     quantity: z.number().int().positive().default(1),
   }),
+  output: z.record(z.string(), z.any()),
   handler: async (input, ctx) => {
     const cart = addToCart(
       ctx.user.id || SHOPPER_USER_ID,
@@ -133,10 +129,14 @@ const addToCartTool = Konsier.tool({
   },
 });
 
-const viewCartTool = Konsier.tool({
-  name: "View Cart",
+const viewCartTool = Konsier.operation({
+  service: "app",
+  resource: "operations",
+  action: "view_cart",
+  title: "View Cart",
   description: "Inspect the current shopper cart.",
   input: z.object({}),
+  output: z.record(z.string(), z.any()),
   handler: async (_input, ctx) => {
     return {
       cart: getCart(ctx.user.id || SHOPPER_USER_ID),
@@ -144,12 +144,16 @@ const viewCartTool = Konsier.tool({
   },
 });
 
-const removeFromCartTool = Konsier.tool({
-  name: "Remove From Cart",
+const removeFromCartTool = Konsier.operation({
+  service: "app",
+  resource: "operations",
+  action: "remove_from_cart",
+  title: "Remove From Cart",
   description: "Remove one product from the current shopper cart.",
   input: z.object({
     productId: z.string().min(1),
   }),
+  output: z.record(z.string(), z.any()),
   handler: async (input, ctx) => {
     return {
       cart: removeFromCart(ctx.user.id || SHOPPER_USER_ID, input.productId),
@@ -157,12 +161,16 @@ const removeFromCartTool = Konsier.tool({
   },
 });
 
-const checkoutQuoteTool = Konsier.tool({
-  name: "Checkout Quote",
+const checkoutQuoteTool = Konsier.operation({
+  service: "app",
+  resource: "operations",
+  action: "checkout_quote",
+  title: "Checkout Quote",
   description: "Create a mock quote for the current cart and clear it.",
   input: z.object({
     notes: z.string().optional(),
   }),
+  output: z.record(z.string(), z.any()),
   handler: async (input, ctx) => {
     const quote = checkoutCart(
       ctx.user.id || SHOPPER_USER_ID,
@@ -176,10 +184,14 @@ const checkoutQuoteTool = Konsier.tool({
   },
 });
 
-const listProductsTool = Konsier.tool({
-  name: "List Products",
+const listProductsTool = Konsier.operation({
+  service: "app",
+  resource: "operations",
+  action: "list_products",
+  title: "List Products",
   description: "List every product, including unavailable items.",
   input: z.object({}),
+  output: z.record(z.string(), z.any()),
   handler: async () => {
     return {
       products: catalogSnapshot().products,
@@ -187,8 +199,11 @@ const listProductsTool = Konsier.tool({
   },
 });
 
-const createProductTool = Konsier.tool({
-  name: "Create Product",
+const createProductTool = Konsier.operation({
+  service: "app",
+  resource: "operations",
+  action: "create_product",
+  title: "Create Product",
   description: "Create a new mock product for owner workflows.",
   input: z.object({
     name: z.string().min(1),
@@ -197,6 +212,7 @@ const createProductTool = Konsier.tool({
     price: z.number().positive(),
     inventory: z.number().int().nonnegative(),
   }),
+  output: z.record(z.string(), z.any()),
   handler: async (input) => {
     return {
       product: createProduct(input),
@@ -204,13 +220,17 @@ const createProductTool = Konsier.tool({
   },
 });
 
-const updatePriceTool = Konsier.tool({
-  name: "Update Price",
+const updatePriceTool = Konsier.operation({
+  service: "app",
+  resource: "operations",
+  action: "update_price",
+  title: "Update Price",
   description: "Update the listed price for a product.",
   input: z.object({
     productId: z.string().min(1),
     price: z.number().positive(),
   }),
+  output: z.record(z.string(), z.any()),
   handler: async (input) => {
     const product = updatePrice(input.productId, input.price);
     if (!product) {
@@ -221,13 +241,17 @@ const updatePriceTool = Konsier.tool({
   },
 });
 
-const setInventoryTool = Konsier.tool({
-  name: "Set Inventory",
+const setInventoryTool = Konsier.operation({
+  service: "app",
+  resource: "operations",
+  action: "set_inventory",
+  title: "Set Inventory",
   description: "Replace the current product inventory count.",
   input: z.object({
     productId: z.string().min(1),
     inventory: z.number().int().nonnegative(),
   }),
+  output: z.record(z.string(), z.any()),
   handler: async (input) => {
     const product = setInventory(input.productId, input.inventory);
     if (!product) {
@@ -238,13 +262,17 @@ const setInventoryTool = Konsier.tool({
   },
 });
 
-const toggleAvailabilityTool = Konsier.tool({
-  name: "Toggle Availability",
+const toggleAvailabilityTool = Konsier.operation({
+  service: "app",
+  resource: "operations",
+  action: "toggle_availability",
+  title: "Toggle Availability",
   description: "Publish or hide a product from the shopper catalog.",
   input: z.object({
     productId: z.string().min(1),
     available: z.boolean(),
   }),
+  output: z.record(z.string(), z.any()),
   handler: async (input) => {
     const product = toggleAvailability(input.productId, input.available);
     if (!product) {
@@ -261,13 +289,16 @@ export const sdk = new Konsier({
   endpointUrl:
     process.env.KONSIER_ENDPOINT_URL ??
     `http://localhost:${process.env.PORT ?? "3003"}/api/konsier`,
+  publicUrl:
+    process.env.KONSIER_PUBLIC_URL ??
+    `http://localhost:${process.env.PORT ?? "3003"}`,
   agents: {
     shopping_assistant: {
       name: "Shopping Assistant",
       description: "Helps shoppers browse products and create quotes.",
       systemPrompt:
         "You help shoppers explore products and place mock orders. Always use tools before stating inventory or totals.",
-      tools: [
+      operations: [
         searchProductsTool,
         viewProductTool,
         addToCartTool,
@@ -278,7 +309,7 @@ export const sdk = new Konsier({
     },
   },
   internal: {
-    tools: [
+    operations: [
       listProductsTool,
       createProductTool,
       updatePriceTool,

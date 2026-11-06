@@ -2,6 +2,21 @@
 
 Internal pages are protected routes served by your app and launched from Konsier.
 
+Configure `publicUrl` as the public origin that serves these routes. It is separate
+from `endpointUrl`, which identifies the SDK webhook route:
+
+```ts
+const konsier = new Konsier({
+  apiKey: process.env.KONSIER_API_KEY!,
+  endpointUrl: "https://your-app.example.com/konsier",
+  publicUrl: "https://your-app.example.com",
+  // ...
+});
+```
+
+`publicUrl` must not contain a path, query string, or hash. A manifest containing
+Pages cannot sync until `publicUrl` is configured.
+
 ## Express
 
 ```ts
@@ -63,10 +78,7 @@ app.get("/pages/dashboard", async (request, reply) => {
 
 ```ts
 import { Hono } from "hono";
-import {
-  konsierWebhook,
-  verifyKonsierPageRequest,
-} from "konsier/hono";
+import { konsierWebhook, verifyKonsierPageRequest } from "konsier/hono";
 
 const app = new Hono();
 

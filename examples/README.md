@@ -38,6 +38,6 @@ These examples live in the repository only. They are not shipped in the publishe
 2. Install dependencies and create `.env` from `.env.example`.
 3. Start the local server.
 4. Sync the local SDK config to Konsier if the example does not do it automatically on boot.
-5. In Konsier, point a project implementation endpoint at the example's configured `endpointUrl`.
+5. Configure the example's `endpointUrl` as the SDK webhook and `publicUrl` as the public app origin.
 6. Link the relevant agent ref(s).
 7. Configure any channel you want in Konsier. Telegram is usually the fastest path for manual testing.

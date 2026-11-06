@@ -77,12 +77,14 @@ export function tsconfigTemplate(): string {
 export function envTemplate(input: {
   apiKey: string;
   endpointUrl: string;
+  publicUrl: string;
   port: number;
   database: DatabaseOption;
 }): string {
   return [
     `KONSIER_API_KEY=${input.apiKey}`,
     `KONSIER_ENDPOINT_URL=${input.endpointUrl}`,
+    `KONSIER_PUBLIC_URL=${input.publicUrl}`,
     `PORT=${input.port}`,
     ...databaseEnv(input.database),
     "",
@@ -91,12 +93,14 @@ export function envTemplate(input: {
 
 export function envExampleTemplate(input: {
   endpointUrl: string;
+  publicUrl: string;
   port: number;
   database: DatabaseOption;
 }): string {
   return [
     "KONSIER_API_KEY=ks_live_xxxxx",
     `KONSIER_ENDPOINT_URL=${input.endpointUrl}`,
+    `KONSIER_PUBLIC_URL=${input.publicUrl}`,
     `PORT=${input.port}`,
     ...databaseEnv(input.database),
     "",
@@ -119,6 +123,7 @@ export function readmeTemplate(input: {
   framework: Framework;
   database: DatabaseOption;
   endpointUrl: string;
+  publicUrl: string;
   projectNameResolved: string;
   telegramBotUsername: string | null;
 }): string {
@@ -134,13 +139,14 @@ This project was scaffolded for Konsier project **${input.projectNameResolved}**
 1. Install dependencies if needed: \`npm install\`
 2. Start the app: \`npm run dev\`
 3. Make sure your public tunnel/domain is running before expecting Konsier sync to succeed
-4. Confirm \`KONSIER_ENDPOINT_URL\` points at that public app URL plus \`/konsier\`
+4. Confirm \`KONSIER_PUBLIC_URL\` is the public app origin and \`KONSIER_ENDPOINT_URL\` is its webhook route
 5. Run \`npm run sync\` when you want to register the current manifest explicitly
 
 ## Environment
 
 - \`KONSIER_API_KEY\`
 - \`KONSIER_ENDPOINT_URL\`
+- \`KONSIER_PUBLIC_URL\`
 - \`PORT\`
 
 ## Stack
@@ -148,6 +154,7 @@ This project was scaffolded for Konsier project **${input.projectNameResolved}**
 - Framework: \`${input.framework}\`
 - Database: \`${input.database}\`
 - Endpoint: \`${input.endpointUrl}\`
+- Public origin: \`${input.publicUrl}\`
 
 ## Channel Setup
 

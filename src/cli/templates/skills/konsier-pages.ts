@@ -22,5 +22,5 @@ Authorized page requests expose page context including:
 - \`theme\`
 - \`user\`
 
-Use \`internal.tools\` for tools that should be available across agents.`,
+Use \`internal.operations\` for operations that should be available across agents.`,
 };

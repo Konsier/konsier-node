@@ -2,12 +2,10 @@ import type { SkillTemplate } from "../../types";
 
 export const konsierMessagingSkill: SkillTemplate = {
   name: "konsier-messaging",
-  description: "Proactive messaging, ending flows, and quick replies.",
+  description: "Proactive messaging and quick replies.",
   body: `# Konsier Messaging
 
 Use \`konsier.sendMessage()\` for proactive outbound messages.
-
-Use \`ctx.end()\` when the tool should control the final user-facing response.
 
 Quick replies use:
 
@@ -15,9 +13,6 @@ Quick replies use:
 { label: "Yes", value: "yes" }
 \`\`\`
 
-Prefer \`ctx.end()\` when:
-
-- the tool is returning the final message
-- the tool is offering next-step choices
-- the conversation should clearly conclude`,
+Operation handlers return structured data. The agent's plain final text is the
+user-facing reply; there is no operation-level terminal signal.`,
 };

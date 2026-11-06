@@ -1,4 +1,4 @@
-import type { Channel, ToolMessage } from "../types";
+import type { Channel, OperationMessage } from "../types";
 
 export interface InboundAccount {
   id: number | string;
@@ -13,8 +13,8 @@ export interface InboundUser {
   metadata: Record<string, unknown> | null;
 }
 
-export interface ToolCallRequest {
-  type: "tool_call";
+export interface OperationInvokeRequest {
+  type: "operation_invoke";
   conversation: {
     id: number;
     project_id: number;
@@ -22,7 +22,7 @@ export interface ToolCallRequest {
     started_at: string;
     message_count: number;
   };
-  messages: ToolMessage[];
+  messages: OperationMessage[];
   channel: Channel;
   target:
     | {
@@ -32,10 +32,15 @@ export interface ToolCallRequest {
     | {
         type: "internal";
       };
-  tool: {
-    name: string;
-    input: Record<string, unknown>;
+  operation: {
+    service: string;
+    resource: string;
+    action: string;
   };
+  idempotency_key: string;
+  attempt_id: string;
+  bypass_approval_reason?: string;
+  input: Record<string, unknown>;
   account: InboundAccount | null;
   user: InboundUser | null;
 }
@@ -56,7 +61,7 @@ export interface SlashCommandRequest {
     started_at: string;
     message_count: number;
   };
-  messages: ToolMessage[];
+  messages: OperationMessage[];
   channel: "telegram";
   command: {
     name: string;
@@ -87,27 +92,36 @@ export interface ManifestRequest {
 }
 
 export type SdkHandlerRequest =
-  | ToolCallRequest
+  | OperationInvokeRequest
   | ResolveAgentRequest
   | SlashCommandRequest
   | EventDispatchRequest
   | ManifestRequest;
 
-export type ToolCallResponse = Record<string, unknown>;
+export interface OperationInvokeResponse {
+  ok: true;
+  output: Record<string, unknown>;
+  attachments?: Array<Record<string, unknown>>;
+}
 
 export interface ResolveAgentResponse {
   systemPrompt: string;
-  tools: Array<{
-    name: string;
+  operations: Array<{
+    service: string;
+    resource: string;
+    action: string;
+    title: string;
     description: string;
-    input: Record<string, unknown>;
+    inputSchema: Record<string, unknown>;
+    outputSchema: Record<string, unknown>;
+    approval: { required: boolean; bypassable: boolean };
   }>;
 }
 
 export interface SlashCommandResponse {
   message?: {
     text?: string;
-    attachments?: ToolMessage["attachments"];
+    attachments?: OperationMessage["attachments"];
     quickReplies?: Array<{
       label: string;
       value: string;
@@ -116,7 +130,6 @@ export interface SlashCommandResponse {
 }
 
 export interface EventDispatchResponse {
-  end?: boolean;
   data?: Record<string, unknown>;
 }
 
@@ -129,6 +142,17 @@ export interface ManifestResponse {
     {
       name: string;
       description: string | null;
+      systemPrompt: string;
+      operations: Array<{
+        service: string;
+        resource: string;
+        action: string;
+        title: string;
+        description: string;
+        inputSchema: Record<string, unknown>;
+        outputSchema: Record<string, unknown>;
+        approval: { required: boolean; bypassable: boolean };
+      }>;
       events?: string[];
       telegram?: {
         slashCommands: Array<{
@@ -140,10 +164,15 @@ export interface ManifestResponse {
     }
   >;
   internal?: {
-    tools: Array<{
-      name: string;
+    operations: Array<{
+      service: string;
+      resource: string;
+      action: string;
+      title: string;
       description: string;
-      input: Record<string, unknown>;
+      inputSchema: Record<string, unknown>;
+      outputSchema: Record<string, unknown>;
+      approval: { required: boolean; bypassable: boolean };
     }>;
     pages: Array<{
       name: string;

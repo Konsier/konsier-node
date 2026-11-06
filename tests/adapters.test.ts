@@ -1,25 +1,46 @@
 import { z } from "zod";
 
-import { serveKonsier, verifyKonsierPage as verifyExpressPage } from "../src/adapters/express";
+import {
+  serveKonsier,
+  verifyKonsierPage as verifyExpressPage,
+} from "../src/adapters/express";
 import { registerKonsier } from "../src/adapters/fastify";
-import { konsierWebhook, serveKonsier as serveHonoKonsier, verifyKonsierPageRequest as verifyHonoPage } from "../src/adapters/hono";
-import { createKonsierRoute, verifyKonsierPageRequest as verifyNextPage } from "../src/adapters/next";
-import { PAGE_LAUNCH_QUERY_PARAM, PAGE_SESSION_COOKIE_NAME } from "../src/constants";
-import { createKonsierSignature, createPageLaunchToken } from "../src/protocol/signatures";
+import {
+  konsierWebhook,
+  serveKonsier as serveHonoKonsier,
+  verifyKonsierPageRequest as verifyHonoPage,
+} from "../src/adapters/hono";
+import {
+  createKonsierRoute,
+  verifyKonsierPageRequest as verifyNextPage,
+} from "../src/adapters/next";
+import {
+  PAGE_LAUNCH_QUERY_PARAM,
+  PAGE_SESSION_COOKIE_NAME,
+} from "../src/constants";
+import {
+  createKonsierSignature,
+  createPageLaunchToken,
+} from "../src/protocol/signatures";
 import { Konsier } from "../src/client";
 
 function createSdk() {
   return new Konsier({
     apiKey: "k_test_123",
     endpointUrl: "https://example.com/konsier",
+    publicUrl: "https://example.com",
     agents: {
       customer: {
         systemPrompt: "You help customers.",
-        tools: [
-          Konsier.tool({
-            name: "ping",
+        operations: [
+          Konsier.operation({
+            service: "app",
+            resource: "operations",
+            action: "ping",
+            title: "ping",
             description: "Return pong",
             input: z.object({ value: z.string() }),
+            output: z.record(z.string(), z.any()),
             handler: async (input) => ({ pong: input.value }),
           }),
         ],
@@ -28,7 +49,10 @@ function createSdk() {
   });
 }
 
-function createSignedFetchRequest(apiKey: string, body: Record<string, unknown>) {
+function createSignedFetchRequest(
+  apiKey: string,
+  body: Record<string, unknown>,
+) {
   const payload = JSON.stringify(body);
   const timestamp = Date.now().toString();
   const signature = createKonsierSignature({
@@ -92,7 +116,7 @@ describe("framework adapters", () => {
     const route = createKonsierRoute(sdk);
     const response = await route(
       createSignedFetchRequest("k_test_123", {
-        type: "tool_call",
+        type: "operation_invoke",
         conversation: {
           id: 1,
           project_id: 10,
@@ -106,10 +130,14 @@ describe("framework adapters", () => {
           type: "agent",
           agent: "customer",
         },
-        tool: {
-          name: "ping",
-          input: { value: "ok" },
+        operation: {
+          service: "app",
+          resource: "operations",
+          action: "ping",
         },
+        idempotency_key: "idem_1",
+        attempt_id: "attempt_1",
+        input: { value: "ok" },
         account: null,
         user: {
           id: 7,
@@ -121,7 +149,10 @@ describe("framework adapters", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ pong: "ok" });
+    expect(await response.json()).toEqual({
+      ok: true,
+      output: { pong: "ok" },
+    });
   });
 
   it("registers the fastify webhook route from endpointUrl", () => {
@@ -239,7 +270,7 @@ describe("framework adapters", () => {
     expect(honoSession.context.theme).toBe("dark");
   });
 
-  it("syncs the current instance using its configured endpoint", async () => {
+  it("syncs the current instance using its configured endpoint and public origin", async () => {
     const sdk = createSdk();
     const calls: Array<{ path: string; body: Record<string, unknown> }> = [];
 
@@ -260,7 +291,10 @@ describe("framework adapters", () => {
     expect(calls).toEqual([
       {
         path: "/agents/refresh",
-        body: { endpoint_url: "https://example.com/konsier" },
+        body: {
+          endpoint_url: "https://example.com/konsier",
+          public_url: "https://example.com",
+        },
       },
     ]);
   });
@@ -278,7 +312,7 @@ describe("framework adapters", () => {
           name: account?.name ?? "customer",
           description: "Resolver agent",
           systemPrompt: "Support",
-          tools: [],
+          operations: [],
           events: {
             beforeConversationCreated: () => {},
             onMessageReceived: () => {},

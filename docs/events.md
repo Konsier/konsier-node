@@ -11,7 +11,7 @@ const konsier = new Konsier({
   events: {
     beforeAccountConnect: async (ctx) => {
       if (!isAllowed(ctx.payload.user_id)) {
-        return ctx.end({ text: "Account linking is not allowed." });
+        throw new Error("Account linking is not allowed.");
       }
     },
     onAccountConnected: async (ctx) => {
@@ -62,11 +62,11 @@ const konsier = new Konsier({
   agents: {
     support_bot: {
       systemPrompt: "Handle support requests.",
-      tools: [lookupTicketTool],
+      operations: [lookupTicketOperation],
       events: {
         beforeMessageReceived: async (ctx) => {
           if (ctx.payload.mode === "manual") {
-            return ctx.end({ text: "A human is already handling this chat." });
+            await auditLog("message.received.while_manual", ctx.payload);
           }
         },
         onHumanRequested: async (ctx) => {

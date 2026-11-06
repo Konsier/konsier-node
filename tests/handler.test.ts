@@ -50,20 +50,28 @@ function createSignedRequest(apiKey: string, body: Record<string, unknown>) {
 describe("webhookHandler", () => {
   const apiKey = "k_test_123";
 
-  const getMenu = Konsier.tool({
-    name: "get_menu",
+  const getMenu = Konsier.operation({
+    service: "app",
+    resource: "operations",
+    action: "get_menu",
+    title: "get_menu",
     description: "Return menu data",
     input: z.object({ category: z.string().optional() }),
+    output: z.record(z.string(), z.any()),
     handler: async (input) => ({
       items: [],
       category: input.category ?? null,
     }),
   });
 
-  const lookupOrder = Konsier.tool({
-    name: "lookup_order",
+  const lookupOrder = Konsier.operation({
+    service: "app",
+    resource: "operations",
+    action: "lookup_order",
+    title: "lookup_order",
     description: "Lookup an order",
     input: z.object({ orderId: z.string() }),
+    output: z.record(z.string(), z.any()),
     handler: async (input) => ({
       orderId: input.orderId,
       status: "ready",
@@ -78,19 +86,19 @@ describe("webhookHandler", () => {
         name: "Customer Support",
         description: "Handles restaurant support questions.",
         systemPrompt: "You help customers.",
-        tools: [getMenu],
+        operations: [getMenu],
       },
     },
     internal: {
-      tools: [lookupOrder],
+      operations: [lookupOrder],
       pages: [{ name: "Orders", path: "/pages/orders" }],
     },
   });
   const handler = sdk.webhookHandler();
 
-  it("handles agent tool_call requests", async () => {
+  it("handles agent operation_invoke requests", async () => {
     const body = {
-      type: "tool_call",
+      type: "operation_invoke",
       conversation: {
         id: 1,
         project_id: 10,
@@ -98,18 +106,20 @@ describe("webhookHandler", () => {
         started_at: "2026-03-10T00:00:00.000Z",
         message_count: 4,
       },
-      message: {
-        text: "Show me dinner options",
-      },
+      messages: [{ text: "Show me dinner options" }],
       channel: "whatsapp",
       target: {
         type: "agent",
         agent: "customer",
       },
-      tool: {
-        name: "get_menu",
-        input: { category: "dinner" },
+      operation: {
+        service: "app",
+        resource: "operations",
+        action: "get_menu",
       },
+      idempotency_key: "idem_1",
+      attempt_id: "attempt_1",
+      input: { category: "dinner" },
       account: {
         id: 5,
         name: "Acme",
@@ -130,14 +140,17 @@ describe("webhookHandler", () => {
 
     expect(state.statusCode).toBe(200);
     expect(state.body).toEqual({
-      items: [],
-      category: "dinner",
+      ok: true,
+      output: {
+        items: [],
+        category: "dinner",
+      },
     });
   });
 
-  it("handles internal tool_call requests", async () => {
+  it("handles internal operation_invoke requests", async () => {
     const body = {
-      type: "tool_call",
+      type: "operation_invoke",
       conversation: {
         id: 1,
         project_id: 10,
@@ -145,17 +158,19 @@ describe("webhookHandler", () => {
         started_at: "2026-03-10T00:00:00.000Z",
         message_count: 2,
       },
-      message: {
-        text: "Where is order 123?",
-      },
+      messages: [{ text: "Where is order 123?" }],
       channel: "whatsapp",
       target: {
         type: "internal",
       },
-      tool: {
-        name: "lookup_order",
-        input: { orderId: "123" },
+      operation: {
+        service: "app",
+        resource: "operations",
+        action: "lookup_order",
       },
+      idempotency_key: "idem_1",
+      attempt_id: "attempt_1",
+      input: { orderId: "123" },
       account: null,
       user: null,
     };
@@ -167,8 +182,11 @@ describe("webhookHandler", () => {
 
     expect(state.statusCode).toBe(200);
     expect(state.body).toEqual({
-      orderId: "123",
-      status: "ready",
+      ok: true,
+      output: {
+        orderId: "123",
+        status: "ready",
+      },
     });
   });
 
@@ -191,11 +209,13 @@ describe("webhookHandler", () => {
     expect(state.statusCode).toBe(200);
     expect(state.body).toMatchObject({
       systemPrompt: "You help customers.",
-      tools: [
+      operations: [
         {
-          name: "get_menu",
+          service: "app",
+          resource: "operations",
+          action: "get_menu",
           description: "Return menu data",
-          input: {
+          inputSchema: {
             type: "object",
             properties: {
               category: {
@@ -216,7 +236,7 @@ describe("webhookHandler", () => {
       agents: {
         customer: {
           systemPrompt: "Support",
-          tools: [],
+          operations: [],
           telegram: {
             slashCommands: [
               Konsier.telegram.slashCommand({
@@ -275,20 +295,20 @@ describe("webhookHandler", () => {
     });
   });
 
-  it("supports ctx.end() in telegram slash_command handlers", async () => {
+  it("returns slash command messages directly", async () => {
     const commandSdk = new Konsier({
       apiKey,
       endpointUrl: "https://example.com/konsier",
       agents: {
         customer: {
           systemPrompt: "Support",
-          tools: [],
+          operations: [],
           telegram: {
             slashCommands: [
               Konsier.telegram.slashCommand({
                 command: "reset",
                 description: "Reset the thread",
-                handler: (ctx) => ctx.end({ text: "Fresh start!" }),
+                handler: () => ({ text: "Fresh start!" }),
               }),
             ],
           },
@@ -351,7 +371,7 @@ describe("webhookHandler", () => {
       agents: {
         customer: {
           systemPrompt: "Support",
-          tools: [],
+          operations: [],
           events: {
             onMessageReceived: async (ctx) => {
               seen.push({
@@ -429,20 +449,20 @@ describe("webhookHandler", () => {
     ]);
   });
 
-  it("supports ctx.end() in before event handlers", async () => {
+  it("runs before event handlers without a terminal response path", async () => {
     const eventSdk = new Konsier({
       apiKey,
       endpointUrl: "https://example.com/konsier",
       agents: {
         customer: {
           systemPrompt: "Support",
-          tools: [],
+          operations: [],
           events: {
             beforeMessageReceived: (ctx) => {
               expect(ctx.payload).toEqual({
                 conversation_id: 10,
               });
-              return ctx.end({ text: "handled manually" });
+              return undefined;
             },
           },
         },
@@ -470,12 +490,7 @@ describe("webhookHandler", () => {
     await eventHandler(req as never, res as never);
 
     expect(state.statusCode).toBe(200);
-    expect(state.body).toEqual({
-      end: true,
-      data: {
-        text: "handled manually",
-      },
-    });
+    expect(state.body).toEqual({ data: {} });
   });
 
   it("returns 400 for invalid slash_command payloads", async () => {
@@ -547,7 +562,7 @@ describe("webhookHandler", () => {
       agents: {
         customer: {
           systemPrompt: "Support",
-          tools: [],
+          operations: [],
           telegram: {
             slashCommands: [
               Konsier.telegram.slashCommand({
@@ -603,7 +618,7 @@ describe("webhookHandler", () => {
       agents: {
         customer: {
           systemPrompt: "Support",
-          tools: [],
+          operations: [],
         },
       },
     });
@@ -642,7 +657,7 @@ describe("webhookHandler", () => {
       agents: {
         customer: {
           systemPrompt: "Support",
-          tools: [],
+          operations: [],
         },
       },
     });
@@ -723,7 +738,7 @@ describe("webhookHandler", () => {
       agents: {
         customer: {
           systemPrompt: "Support",
-          tools: [],
+          operations: [],
           events: {
             onMessageReceived: async () => "ignored" as never,
           },
@@ -755,19 +770,21 @@ describe("webhookHandler", () => {
   });
 
   it("exports attachment helper inputs as att refs and parses resolved attachments", async () => {
-    const attachTool = Konsier.tool({
-      name: "Save Receipt",
+    const attachTool = Konsier.operation({
+      service: "app",
+      resource: "operations",
+      action: "save_receipt",
+      title: "Save Receipt",
       description: "Save an uploaded receipt",
       input: z.object({
-        receipt: Konsier.attachment.file()
+        receipt: Konsier.attachment
+          .file()
           .describe("Uploaded receipt from the conversation"),
         fallback: z
-          .union([
-            Konsier.attachment.image(),
-            Konsier.attachment.file(),
-          ])
+          .union([Konsier.attachment.image(), Konsier.attachment.file()])
           .optional(),
       }),
+      output: z.record(z.string(), z.any()),
       handler: async (input) => ({
         type: input.receipt.type,
         receiptName: input.receipt.name ?? null,
@@ -781,7 +798,7 @@ describe("webhookHandler", () => {
       agents: {
         customer: {
           systemPrompt: "Support",
-          tools: [attachTool],
+          operations: [attachTool],
         },
       },
     });
@@ -798,10 +815,12 @@ describe("webhookHandler", () => {
 
     expect(resolveRes.state.statusCode).toBe(200);
     expect(resolveRes.state.body).toMatchObject({
-      tools: [
+      operations: [
         {
-          name: "save_receipt",
-          input: {
+          service: "app",
+          resource: "operations",
+          action: "save_receipt",
+          inputSchema: {
             type: "object",
             properties: {
               receipt: {
@@ -841,7 +860,7 @@ describe("webhookHandler", () => {
     });
 
     const toolReq = createSignedRequest(apiKey, {
-      type: "tool_call",
+      type: "operation_invoke",
       conversation: {
         id: 1,
         project_id: 10,
@@ -860,23 +879,27 @@ describe("webhookHandler", () => {
         type: "agent",
         agent: "customer",
       },
-      tool: {
-        name: "save_receipt",
-        input: {
-          receipt: {
-            id: "att_1",
-            type: "file",
-            name: "receipt.pdf",
-            url: "storage://receipt.pdf",
-            mimeType: "application/pdf",
-          },
-          fallback: {
-            id: "att_2",
-            type: "image",
-            name: "photo.jpg",
-            url: "storage://photo.jpg",
-            mimeType: "image/jpeg",
-          },
+      operation: {
+        service: "app",
+        resource: "operations",
+        action: "save_receipt",
+      },
+      idempotency_key: "idem_1",
+      attempt_id: "attempt_1",
+      input: {
+        receipt: {
+          id: "att_1",
+          type: "file",
+          name: "receipt.pdf",
+          url: "storage://receipt.pdf",
+          mimeType: "application/pdf",
+        },
+        fallback: {
+          id: "att_2",
+          type: "image",
+          name: "photo.jpg",
+          url: "storage://photo.jpg",
+          mimeType: "image/jpeg",
         },
       },
       account: null,
@@ -888,15 +911,21 @@ describe("webhookHandler", () => {
 
     expect(toolRes.state.statusCode).toBe(200);
     expect(toolRes.state.body).toEqual({
-      type: "file",
-      receiptName: "receipt.pdf",
-      fallbackType: "image",
+      ok: true,
+      output: {
+        type: "file",
+        receiptName: "receipt.pdf",
+        fallbackType: "image",
+      },
     });
   });
 
   it("supports arrays of typed attachment helpers", async () => {
-    const attachTool = Konsier.tool({
-      name: "Save Gallery",
+    const attachTool = Konsier.operation({
+      service: "app",
+      resource: "operations",
+      action: "save_gallery",
+      title: "Save Gallery",
       description: "Save uploaded images",
       input: z.object({
         photos: z
@@ -904,6 +933,7 @@ describe("webhookHandler", () => {
           .min(1)
           .describe("Uploaded photos from the conversation"),
       }),
+      output: z.record(z.string(), z.any()),
       handler: async (input) => ({
         count: input.photos.length,
         firstType: input.photos[0]?.type ?? null,
@@ -916,7 +946,7 @@ describe("webhookHandler", () => {
       agents: {
         customer: {
           systemPrompt: "Support",
-          tools: [attachTool],
+          operations: [attachTool],
         },
       },
     });
@@ -933,10 +963,12 @@ describe("webhookHandler", () => {
 
     expect(resolveRes.state.statusCode).toBe(200);
     expect(resolveRes.state.body).toMatchObject({
-      tools: [
+      operations: [
         {
-          name: "save_gallery",
-          input: {
+          service: "app",
+          resource: "operations",
+          action: "save_gallery",
+          inputSchema: {
             properties: {
               photos: {
                 type: "array",
@@ -957,7 +989,7 @@ describe("webhookHandler", () => {
     });
 
     const toolReq = createSignedRequest(apiKey, {
-      type: "tool_call",
+      type: "operation_invoke",
       conversation: {
         id: 1,
         project_id: 10,
@@ -976,24 +1008,28 @@ describe("webhookHandler", () => {
         type: "agent",
         agent: "customer",
       },
-      tool: {
-        name: "save_gallery",
-        input: {
-          photos: [
-            {
-              id: "att_1",
-              type: "image",
-              name: "photo-1.jpg",
-              url: "https://example.com/photo-1.jpg",
-            },
-            {
-              id: "att_2",
-              type: "image",
-              name: "photo-2.jpg",
-              url: "https://example.com/photo-2.jpg",
-            },
-          ],
-        },
+      operation: {
+        service: "app",
+        resource: "operations",
+        action: "save_gallery",
+      },
+      idempotency_key: "idem_1",
+      attempt_id: "attempt_1",
+      input: {
+        photos: [
+          {
+            id: "att_1",
+            type: "image",
+            name: "photo-1.jpg",
+            url: "https://example.com/photo-1.jpg",
+          },
+          {
+            id: "att_2",
+            type: "image",
+            name: "photo-2.jpg",
+            url: "https://example.com/photo-2.jpg",
+          },
+        ],
       },
       account: null,
       user: null,
@@ -1004,16 +1040,23 @@ describe("webhookHandler", () => {
 
     expect(toolRes.state.statusCode).toBe(200);
     expect(toolRes.state.body).toEqual({
-      count: 2,
-      firstType: "image",
+      ok: true,
+      output: {
+        count: 2,
+        firstType: "image",
+      },
     });
   });
 
   it("normalizes human-readable tool names for manifest and invocation", async () => {
-    const friendlyTool = Konsier.tool({
-      name: "Search Products",
+    const friendlyTool = Konsier.operation({
+      service: "app",
+      resource: "operations",
+      action: "search_products",
+      title: "Search Products",
       description: "Search product data",
       input: z.object({ query: z.string().optional() }),
+      output: z.record(z.string(), z.any()),
       handler: async (input) => ({
         ok: true,
         query: input.query ?? null,
@@ -1026,7 +1069,7 @@ describe("webhookHandler", () => {
       agents: {
         customer: {
           systemPrompt: "Support",
-          tools: [friendlyTool],
+          operations: [friendlyTool],
         },
       },
     });
@@ -1043,16 +1086,18 @@ describe("webhookHandler", () => {
 
     expect(resolveRes.state.statusCode).toBe(200);
     expect(resolveRes.state.body).toMatchObject({
-      tools: [
+      operations: [
         {
-          name: "search_products",
+          service: "app",
+          resource: "operations",
+          action: "search_products",
           description: "Search product data",
         },
       ],
     });
 
     const toolReq = createSignedRequest(apiKey, {
-      type: "tool_call",
+      type: "operation_invoke",
       conversation: {
         id: 1,
         project_id: 10,
@@ -1060,18 +1105,20 @@ describe("webhookHandler", () => {
         started_at: "2026-03-10T00:00:00.000Z",
         message_count: 1,
       },
-      message: {
-        text: "Find products",
-      },
+      messages: [{ text: "Find products" }],
       channel: "whatsapp",
       target: {
         type: "agent",
         agent: "customer",
       },
-      tool: {
-        name: "search_products",
-        input: { query: "mug" },
+      operation: {
+        service: "app",
+        resource: "operations",
+        action: "search_products",
       },
+      idempotency_key: "idem_1",
+      attempt_id: "attempt_1",
+      input: { query: "mug" },
       account: null,
       user: null,
     });
@@ -1082,11 +1129,14 @@ describe("webhookHandler", () => {
     expect(toolRes.state.statusCode).toBe(200);
     expect(toolRes.state.body).toEqual({
       ok: true,
-      query: "mug",
+      output: {
+        ok: true,
+        query: "mug",
+      },
     });
   });
 
-  it("rejects duplicate normalized tool keys", () => {
+  it("rejects duplicate operation identities", () => {
     expect(
       () =>
         new Konsier({
@@ -1095,38 +1145,52 @@ describe("webhookHandler", () => {
           agents: {
             customer: {
               systemPrompt: "Support",
-              tools: [
-                Konsier.tool({
-                  name: "Search Products",
+              operations: [
+                Konsier.operation({
+                  service: "app",
+                  resource: "operations",
+                  action: "search_products",
+                  title: "Search Products",
                   description: "First tool",
                   input: z.object({}),
+                  output: z.record(z.string(), z.any()),
                   handler: async () => ({ ok: true }),
                 }),
-                Konsier.tool({
-                  name: "search-products",
+                Konsier.operation({
+                  service: "app",
+                  resource: "operations",
+                  action: "search_products",
+                  title: "search-products",
                   description: "Second tool",
                   input: z.object({}),
+                  output: z.record(z.string(), z.any()),
                   handler: async () => ({ ok: true }),
                 }),
               ],
             },
           },
         }),
-    ).toThrow('duplicate normalized tool key "search_products"');
+    ).toThrow(
+      'agent "customer" contains duplicate operation "app.operations.search_products"',
+    );
   });
 
-  it("returns a coded error when tool output is not an object", async () => {
+  it("returns a coded validation error when operation output is invalid", async () => {
     const badSdk = new Konsier({
       apiKey,
       endpointUrl: "https://example.com/konsier",
       agents: {
         customer: {
           systemPrompt: "Support",
-          tools: [
-            Konsier.tool({
-              name: "bad_output",
+          operations: [
+            Konsier.operation({
+              service: "app",
+              resource: "operations",
+              action: "bad_output",
+              title: "bad_output",
               description: "Returns a string",
               input: z.object({}),
+              output: z.record(z.string(), z.any()),
               handler: async () => "bad" as never,
             }),
           ],
@@ -1136,7 +1200,7 @@ describe("webhookHandler", () => {
     const badHandler = badSdk.webhookHandler();
 
     const body = {
-      type: "tool_call",
+      type: "operation_invoke",
       conversation: {
         id: 1,
         project_id: 10,
@@ -1144,16 +1208,20 @@ describe("webhookHandler", () => {
         started_at: "2026-03-10T00:00:00.000Z",
         message_count: 1,
       },
-      message: {},
+      messages: [{}],
       channel: "whatsapp",
       target: {
         type: "agent",
         agent: "customer",
       },
-      tool: {
-        name: "bad_output",
-        input: {},
+      operation: {
+        service: "app",
+        resource: "operations",
+        action: "bad_output",
       },
+      idempotency_key: "idem_1",
+      attempt_id: "attempt_1",
+      input: {},
       account: null,
       user: null,
     };
@@ -1163,28 +1231,30 @@ describe("webhookHandler", () => {
 
     await badHandler(req as never, res as never);
 
-    expect(state.statusCode).toBe(500);
-    expect(state.body).toEqual({
+    expect(state.statusCode).toBe(400);
+    expect(state.body).toMatchObject({
       error: {
-        code: "tool.execution.invalid_output",
-        message: "Tool handlers must return a JSON object or return ctx.end(...).",
-        action: "Update the tool handler to return a valid JSON object.",
+        code: "validation.request.invalid",
       },
     });
   });
 
-  it("serializes messages, attachments, and end controls from tool handlers", async () => {
+  it("serializes validated output and queued operation attachments", async () => {
     const richSdk = new Konsier({
       apiKey,
       endpointUrl: "https://example.com/konsier",
       agents: {
         customer: {
           systemPrompt: "Support",
-          tools: [
-            Konsier.tool({
-              name: "share_menu",
-              description: "Queue an attachment and stop",
+          operations: [
+            Konsier.operation({
+              service: "app",
+              resource: "operations",
+              action: "share_menu",
+              title: "share_menu",
+              description: "Queue an attachment",
               input: z.object({}),
+              output: z.record(z.string(), z.any()),
               handler: async (_input, ctx) => {
                 expect(ctx.messages).toEqual([
                   {
@@ -1198,16 +1268,7 @@ describe("webhookHandler", () => {
                   url: "https://example.com/menu.jpg",
                   name: "menu.jpg",
                 });
-                return ctx.end({
-                  text: "Here are tonight's specials.",
-                  attachments: [
-                    {
-                      type: "image",
-                      url: "https://example.com/specials.jpg",
-                      name: "specials.jpg",
-                    },
-                  ],
-                });
+                return { shared: true };
               },
             }),
           ],
@@ -1217,7 +1278,7 @@ describe("webhookHandler", () => {
     const richHandler = richSdk.webhookHandler();
 
     const body = {
-      type: "tool_call",
+      type: "operation_invoke",
       conversation: {
         id: 1,
         project_id: 10,
@@ -1236,10 +1297,14 @@ describe("webhookHandler", () => {
         type: "agent",
         agent: "customer",
       },
-      tool: {
-        name: "share_menu",
-        input: {},
+      operation: {
+        service: "app",
+        resource: "operations",
+        action: "share_menu",
       },
+      idempotency_key: "idem_1",
+      attempt_id: "attempt_1",
+      input: {},
       account: null,
       user: null,
     };
@@ -1251,50 +1316,38 @@ describe("webhookHandler", () => {
 
     expect(state.statusCode).toBe(200);
     expect(state.body).toEqual({
-      text: "Here are tonight's specials.",
-      __konsier: {
-        end: true,
-        attachments: [
-          {
-            type: "image",
-            url: "https://example.com/menu.jpg",
-            name: "menu.jpg",
-          },
-          {
-            type: "image",
-            url: "https://example.com/specials.jpg",
-            name: "specials.jpg",
-          },
-        ],
-      },
+      ok: true,
+      output: { shared: true },
+      attachments: [
+        {
+          type: "image",
+          url: "https://example.com/menu.jpg",
+          name: "menu.jpg",
+        },
+      ],
     });
   });
 
-  it("ignores ctx.end when the handler does not return it", async () => {
+  it("provides stable idempotency and unique attempt identifiers", async () => {
     const richSdk = new Konsier({
       apiKey,
       endpointUrl: "https://example.com/konsier",
       agents: {
         customer: {
           systemPrompt: "Support",
-          tools: [
-            Konsier.tool({
-              name: "continue_after_end",
-              description: "Calls ctx.end without returning it",
+          operations: [
+            Konsier.operation({
+              service: "app",
+              resource: "operations",
+              action: "inspect_ids",
+              title: "inspect_ids",
+              description: "Returns operation request identifiers",
               input: z.object({}),
+              output: z.record(z.string(), z.any()),
               handler: async (_input, ctx) => {
-                ctx.end({
-                  text: "This should be ignored.",
-                  attachments: [
-                    {
-                      type: "image",
-                      url: "https://example.com/ignored.jpg",
-                    },
-                  ],
-                });
-
                 return {
-                  ok: true,
+                  idempotencyKey: ctx.idempotencyKey,
+                  attemptId: ctx.attemptId,
                 };
               },
             }),
@@ -1305,7 +1358,7 @@ describe("webhookHandler", () => {
     const richHandler = richSdk.webhookHandler();
 
     const body = {
-      type: "tool_call",
+      type: "operation_invoke",
       conversation: {
         id: 1,
         project_id: 10,
@@ -1324,10 +1377,14 @@ describe("webhookHandler", () => {
         type: "agent",
         agent: "customer",
       },
-      tool: {
-        name: "continue_after_end",
-        input: {},
+      operation: {
+        service: "app",
+        resource: "operations",
+        action: "inspect_ids",
       },
+      idempotency_key: "idem_1",
+      attempt_id: "attempt_1",
+      input: {},
       account: null,
       user: null,
     };
@@ -1340,6 +1397,10 @@ describe("webhookHandler", () => {
     expect(state.statusCode).toBe(200);
     expect(state.body).toEqual({
       ok: true,
+      output: {
+        idempotencyKey: "idem_1",
+        attemptId: "attempt_1",
+      },
     });
   });
 

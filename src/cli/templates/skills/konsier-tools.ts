@@ -2,10 +2,12 @@ import type { SkillTemplate } from "../../types";
 
 export const konsierToolsSkill: SkillTemplate = {
   name: "konsier-tools",
-  description: "Tool creation rules, input schemas, and handler output requirements.",
-  body: `# Konsier Tools
+  description: "Operation creation rules, schemas, approvals, and handler outputs.",
+  body: `# Konsier Operations
 
-Create tools with \`Konsier.tool({ ... })\`.
+Create operations with \`Konsier.operation({ ... })\`. Every operation has lowercase
+\`service\`, \`resource\`, and \`action\` identifiers, a title, a description, input
+and output Zod schemas, and an optional approval policy.
 
 ## Input
 
@@ -15,7 +17,7 @@ Create tools with \`Konsier.tool({ ... })\`.
 ## Handler
 
 - signature: \`async (input, ctx)\`
-- return a plain JSON object or \`ctx.end()\`
+- return a plain JSON object matching the output schema
 - do not return arrays, primitives, or \`null\`
 
 ## Context
@@ -28,6 +30,8 @@ Useful fields on \`ctx\`:
 - \`ctx.account\`
 - \`ctx.conversation\`
 - \`ctx.messages\`
+- \`ctx.idempotencyKey\`
+- \`ctx.attemptId\`
 
 ## Errors
 

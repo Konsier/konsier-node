@@ -12,11 +12,27 @@ describe("client validation", () => {
           agents: {
             customer: {
               systemPrompt: "Support",
-              tools: [],
+              operations: [],
             },
           },
         }),
     ).toThrow("Konsier endpointUrl must use http or https.");
+  });
+
+  it("rejects publicUrl values that are not an origin", () => {
+    expect(
+      () =>
+        new Konsier({
+          apiKey: "k_test_123",
+          publicUrl: "https://example.com/app",
+          agents: {
+            customer: {
+              systemPrompt: "Support",
+              operations: [],
+            },
+          },
+        }),
+    ).toThrow("Konsier publicUrl must be an origin without a path.");
   });
 
   it("rejects missing surfaces", () => {
@@ -36,7 +52,7 @@ describe("client validation", () => {
           agents: {
             a: {
               systemPrompt: "A",
-              tools: [],
+              operations: [],
               telegram: {
                 slashCommands: [
                   Konsier.telegram.slashCommand({
@@ -49,7 +65,7 @@ describe("client validation", () => {
             },
             b: {
               systemPrompt: "B",
-              tools: [],
+              operations: [],
               telegram: {
                 slashCommands: [
                   Konsier.telegram.slashCommand({
@@ -73,7 +89,7 @@ describe("client validation", () => {
           agents: {
             customer: {
               systemPrompt: "Support",
-              tools: [],
+              operations: [],
             },
           },
           events: {
@@ -91,7 +107,7 @@ describe("client validation", () => {
           agents: {
             customer: {
               systemPrompt: "Support",
-              tools: [],
+              operations: [],
               telegram: {
                 events: {
                   onCallbackQuery: "bad",
@@ -111,7 +127,7 @@ describe("client validation", () => {
           agents: {
             customer: {
               systemPrompt: "Support",
-              tools: [],
+              operations: [],
               telegram: {
                 slashCommands: [
                   {
@@ -135,11 +151,15 @@ describe("client validation", () => {
       agents: {
         customer: {
           systemPrompt: "Support",
-          tools: [
-            Konsier.tool({
-              name: "ping",
+          operations: [
+            Konsier.operation({
+              service: "app",
+              resource: "operations",
+              action: "ping",
+              title: "ping",
               description: "Return pong",
               input: z.object({}),
+              output: z.record(z.string(), z.any()),
               handler: async () => ({ ok: true }),
             }),
           ],

@@ -1,4 +1,4 @@
-import type { Tool } from "./tool";
+import type { Operation } from "./tool";
 
 export type MaybePromise<T> = T | Promise<T>;
 export type JsonPrimitive = string | number | boolean | null;
@@ -8,13 +8,7 @@ export interface JsonObject {
 }
 
 export type Channel =
-  | "telegram"
-  | "slack"
-  | "discord"
-  | "whatsapp"
-  | "email"
-  | "sms"
-  | "konsier";
+  "telegram" | "slack" | "discord" | "whatsapp" | "email" | "sms" | "konsier";
 
 export type AttachmentType = "image" | "video" | "audio" | "file" | "location";
 
@@ -101,7 +95,7 @@ export interface ReplyContext extends ReplyPointer {
   message?: QuotedMessage;
 }
 
-export interface ToolMessage {
+export interface OperationMessage {
   text?: string;
   attachments?: Attachment[];
   replyTo?: ReplyContext | null;
@@ -167,11 +161,6 @@ export interface SendMessage {
   quickReplies?: QuickReply[];
 }
 
-export interface EndSignal {
-  readonly __konsierEnd: true;
-  readonly message?: SendMessage;
-}
-
 export interface SendInput extends SendMessage {
   userId?: string;
   conversationId?: string | number;
@@ -232,7 +221,7 @@ export interface SdkAccount {
   }>;
   internal: {
     pages: string[];
-    tools: string[];
+    operations: string[];
   };
 }
 
@@ -301,7 +290,7 @@ export interface NotificationInput {
   navigation: NotificationNavigation;
 }
 
-export type TelegramSlashCommandResult = SendMessage | EndSignal;
+export type TelegramSlashCommandResult = SendMessage;
 
 export interface TelegramSlashCommandContext {
   channel: "telegram";
@@ -312,9 +301,8 @@ export interface TelegramSlashCommandContext {
   };
   user: EndUser;
   conversation: Conversation;
-  messages: ToolMessage[];
+  messages: OperationMessage[];
   account: Account | null;
-  end: (message?: SendMessage) => EndSignal;
 }
 
 export interface TelegramSlashCommandDefinition {
@@ -424,7 +412,6 @@ export interface AgentResourceEventPayload {
 export interface BeforeAccountConnectContext {
   account: Account | null;
   payload: ConnectedAppConnectEventPayload;
-  end: (message?: SendMessage) => EndSignal;
 }
 
 export interface AccountConnectedContext {
@@ -440,7 +427,6 @@ export interface AccountDisconnectedContext {
 export interface BeforeConversationCreatedContext {
   account: Account | null;
   payload: ConversationCreatedEventPayload;
-  end: (message?: SendMessage) => EndSignal;
 }
 
 export interface ConversationCreatedContext {
@@ -451,7 +437,6 @@ export interface ConversationCreatedContext {
 export interface BeforeMessageReceivedContext {
   account: Account | null;
   payload: ConversationMessageReceivedEventPayload;
-  end: (message?: SendMessage) => EndSignal;
 }
 
 export interface MessageReceivedContext {
@@ -487,7 +472,7 @@ export interface HumanRequestedContext {
 export type ProjectEventHandlers = {
   beforeAccountConnect?: (
     ctx: BeforeAccountConnectContext,
-  ) => MaybePromise<void | EndSignal>;
+  ) => MaybePromise<void>;
   onAccountConnected?: (ctx: AccountConnectedContext) => MaybePromise<void>;
   onAccountDisconnected?: (
     ctx: AccountDisconnectedContext,
@@ -497,13 +482,13 @@ export type ProjectEventHandlers = {
 export type AgentEventHandlers = {
   beforeConversationCreated?: (
     ctx: BeforeConversationCreatedContext,
-  ) => MaybePromise<void | EndSignal>;
+  ) => MaybePromise<void>;
   onConversationCreated?: (
     ctx: ConversationCreatedContext,
   ) => MaybePromise<void>;
   beforeMessageReceived?: (
     ctx: BeforeMessageReceivedContext,
-  ) => MaybePromise<void | EndSignal>;
+  ) => MaybePromise<void>;
   onMessageReceived?: (ctx: MessageReceivedContext) => MaybePromise<void>;
   onConversationCleared?: (
     ctx: ConversationClearedContext,
@@ -514,9 +499,7 @@ export type AgentEventHandlers = {
   onConversationTakeover?: (
     ctx: ConversationTakeoverContext,
   ) => MaybePromise<void>;
-  onConversationResume?: (
-    ctx: ConversationResumeContext,
-  ) => MaybePromise<void>;
+  onConversationResume?: (ctx: ConversationResumeContext) => MaybePromise<void>;
   onHumanRequested?: (ctx: HumanRequestedContext) => MaybePromise<void>;
 };
 
@@ -542,7 +525,7 @@ export interface ConversationSummary {
 }
 
 export interface ConversationEntryRecord {
-  entry_type: "message" | "tool_call";
+  entry_type: "message" | "agent_run";
   index: number;
   role?: string;
   message?: MessageEnvelope | null;
@@ -579,7 +562,9 @@ export interface ConversationMessagesListResult {
 export interface ConversationHandle {
   get: () => Promise<ConversationDetailResult>;
   messages: {
-    list: (input?: ConversationMessagesListInput) => Promise<ConversationMessagesListResult>;
+    list: (
+      input?: ConversationMessagesListInput,
+    ) => Promise<ConversationMessagesListResult>;
   };
   sendMessage: (input: SendMessage) => Promise<Record<string, unknown>>;
   clear: () => Promise<Record<string, unknown>>;
@@ -588,15 +573,16 @@ export interface ConversationHandle {
   resume: () => Promise<Record<string, unknown>>;
 }
 
-export interface ToolContext {
+export interface OperationContext {
   channel: Channel;
   agent: string;
   user: EndUser;
   conversation: Conversation;
-  messages: ToolMessage[];
+  messages: OperationMessage[];
   account: Account | null;
+  idempotencyKey: string;
+  attemptId: string;
   attach: (input: AttachInput | AttachInput[]) => void;
-  end: (message?: SendMessage) => EndSignal;
 }
 
 export interface AgentContext {
@@ -612,7 +598,7 @@ export interface AgentConfig {
   name?: string;
   description?: string | null;
   systemPrompt: string;
-  tools: Array<Tool<any, JsonObject>>;
+  operations: Array<Operation<any, JsonObject>>;
   telegram?: AgentTelegramConfig;
   events?: AgentEventHandlers;
 }
@@ -632,7 +618,7 @@ export interface PageDefinition {
 }
 
 export interface InternalDefinition {
-  tools?: Array<Tool<any, JsonObject>>;
+  operations?: Array<Operation<any, JsonObject>>;
   pages?: PageDefinition[];
 }
 
@@ -648,6 +634,7 @@ export interface KonsierOptions {
   internal?: InternalEntry;
   events?: ProjectEventHandlers;
   endpointUrl?: string;
+  publicUrl?: string;
   debug?: boolean;
 }
 

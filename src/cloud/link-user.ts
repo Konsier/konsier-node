@@ -147,8 +147,8 @@ function normalizeSdkAccount(raw: unknown): SdkAccount {
             (value): value is string => typeof value === "string",
           )
         : [],
-      tools: Array.isArray(internalRecord?.tools)
-        ? internalRecord.tools.filter(
+      operations: Array.isArray(internalRecord?.operations)
+        ? internalRecord.operations.filter(
             (value): value is string => typeof value === "string",
           )
         : [],

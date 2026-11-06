@@ -2,7 +2,7 @@
 
 Node.js and TypeScript SDK for [Konsier](https://konsier.com).
 
-Define agents, tools, internal pages, and event handlers in your app. Konsier handles channels, delivery, and orchestration across Telegram, Slack, Discord, WhatsApp, email, SMS, and Konsier's own UI.
+Define agents, typed operations, internal pages, and event handlers in your app. Konsier handles channels, delivery, and orchestration across Telegram, Slack, Discord, WhatsApp, email, SMS, and Konsier's own UI.
 
 ## Requirements
 
@@ -22,7 +22,7 @@ Install your framework separately when needed, for example:
 npm install express
 ```
 
-The SDK uses Zod for typed tool schemas:
+The SDK uses Zod for typed operation schemas:
 
 ```ts
 import { z } from "zod";
@@ -36,11 +36,17 @@ import { Konsier } from "konsier";
 import { serveKonsier } from "konsier/express";
 import { z } from "zod";
 
-const listTasks = Konsier.tool({
-  name: "List Tasks",
+const listTasks = Konsier.operation({
+  service: "tasks",
+  resource: "items",
+  action: "list",
+  title: "List Tasks",
   description: "List current tasks.",
   input: z.object({
     showCompleted: z.boolean().default(true),
+  }),
+  output: z.object({
+    tasks: z.array(z.object({ id: z.string(), title: z.string() })),
   }),
   handler: async (input, ctx) => {
     const tasks = await loadTasks({
@@ -55,13 +61,14 @@ const listTasks = Konsier.tool({
 const konsier = new Konsier({
   apiKey: process.env.KONSIER_API_KEY ?? "",
   endpointUrl: "https://your-app.example.com/konsier",
+  publicUrl: "https://your-app.example.com",
   agents: {
     todo_assistant: {
       name: "Todo Assistant",
       description: "Helps users manage a task list.",
       systemPrompt:
-        "You manage a compact task list. Use tools before answering about task state.",
-      tools: [listTasks],
+        "You manage a compact task list. Use operations before answering about task state.",
+      operations: [listTasks],
     },
   },
   internal: {
@@ -82,20 +89,23 @@ app.listen(3000, async () => {
 ## Core Model
 
 - Agent: a registered assistant implementation keyed by ref such as `todo_assistant`
-- Tool: a typed function defined with `Konsier.tool(...)`
-- Internal tool: an owner-only tool exposed in Konsier, not to end users
+- Operation: a typed function defined with `Konsier.operation(...)`
+- Internal operation: an owner-only operation exposed in Konsier, not to end users
 - Internal page: a protected page served by your app and launched from Konsier
-- Account: connected tenant context passed into tools, pages, and events
+- Account: connected tenant context passed into operations, pages, and events
 - Conversation: a cloud-managed chat thread you can inspect or send into from your backend
 
-## Defining Tools
+## Defining Operations
 
 ```ts
 import { Konsier } from "konsier";
 import { z } from "zod";
 
-const createOrder = Konsier.tool({
-  name: "Create Order",
+const createOrder = Konsier.operation({
+  service: "orders",
+  resource: "drafts",
+  action: "create",
+  title: "Create Order",
   description: "Create a draft order for the current user.",
   input: z.object({
     items: z.array(
@@ -106,6 +116,7 @@ const createOrder = Konsier.tool({
     ),
     note: z.string().optional(),
   }),
+  output: z.object({ orderId: z.string(), status: z.string() }),
   handler: async (input, ctx) => {
     const order = await db.orders.create({
       accountId: ctx.account?.id ?? null,
@@ -122,7 +133,7 @@ const createOrder = Konsier.tool({
 });
 ```
 
-Tool handlers receive a `ToolContext` with channel, agent, user, conversation, messages, account, `attach(...)`, and `end(...)`.
+Operation handlers receive an `OperationContext` with channel, agent, user, conversation, messages, account, stable `idempotencyKey`, unique `attemptId`, and `attach(...)`.
 
 For message payloads, attachment inputs, and attachment-aware tool schemas, see:
 
@@ -140,12 +151,12 @@ const konsier = new Konsier({
       name: "Customer Support",
       description: "Helps customers browse products and place orders.",
       systemPrompt:
-        "Use tools before confirming product details, inventory, or pricing.",
-      tools: [searchProductsTool, createOrderTool],
+        "Use operations before confirming product details, inventory, or pricing.",
+      operations: [searchProductsOperation, createOrderOperation],
     },
     ops_assistant: {
       systemPrompt: "Assist operators with account workflows.",
-      tools: [listAccountsTool],
+      operations: [listAccountsOperation],
     },
   },
 });
@@ -153,13 +164,17 @@ const konsier = new Konsier({
 
 Agent entries can also be async resolvers.
 
-## Internal Tools And Pages
+## Internal Operations And Pages
 
 ```ts
-const salesSnapshot = Konsier.tool({
-  name: "Sales Snapshot",
+const salesSnapshot = Konsier.operation({
+  service: "sales",
+  resource: "snapshots",
+  action: "get",
+  title: "Sales Snapshot",
   description: "Summarize today's sales.",
   input: z.object({}),
+  output: z.object({ revenue: z.number(), orderCount: z.number() }),
   handler: async () => {
     return {
       revenue: 1820,
@@ -175,7 +190,7 @@ const konsier = new Konsier({
     customer_support: customerSupportAgent,
   },
   internal: {
-    tools: [salesSnapshot],
+    operations: [salesSnapshot],
     pages: [
       { name: "Dashboard", path: "/pages/dashboard" },
       { name: "Orders", path: "/pages/orders" },
@@ -327,6 +342,7 @@ type KonsierOptions = {
   internal?: InternalEntry;
   events?: ProjectEventHandlers;
   endpointUrl?: string;
+  publicUrl?: string;
   debug?: boolean;
 };
 ```
@@ -338,24 +354,25 @@ type AgentConfig = {
   name?: string;
   description?: string | null;
   systemPrompt: string;
-  tools: Tool[];
+  operations: Operation[];
   telegram?: AgentTelegramConfig;
   events?: AgentEventHandlers;
 };
 ```
 
-### `ToolContext`
+### `OperationContext`
 
 ```ts
-type ToolContext = {
+type OperationContext = {
   channel: Channel;
   agent: string;
   user: EndUser;
   conversation: Conversation;
-  messages: ToolMessage[];
+  messages: OperationMessage[];
   account: Account | null;
+  idempotencyKey: string;
+  attemptId: string;
   attach: (input: AttachInput | AttachInput[]) => void;
-  end: (message?: SendMessage) => EndSignal;
 };
 ```
 
@@ -377,6 +394,7 @@ Common environment variables used by apps in this repo:
 
 - `KONSIER_API_KEY`
 - `KONSIER_ENDPOINT_URL`
+- `KONSIER_PUBLIC_URL`
 - `PORT`
 
 `debug: true` enables SDK debug logging in development mode.
@@ -397,9 +415,9 @@ Common environment variables used by apps in this repo:
 Repo examples live under [`examples/`](/Users/emmanuelgyekyeatta-penkra/Desktop/Workspace/Konsier/konsier-node/examples).
 
 - [`examples/todo`](/Users/emmanuelgyekyeatta-penkra/Desktop/Workspace/Konsier/konsier-node/examples/todo)
-  Express app showing attachment-aware tools and an internal tasks page
+  Express app showing attachment-aware operations and an internal tasks page
 - [`examples/restaurant-manager`](/Users/emmanuelgyekyeatta-penkra/Desktop/Workspace/Konsier/konsier-node/examples/restaurant-manager)
-  Fastify app showing multi-tenant agent flows, owner tools, and owner pages
+  Fastify app showing multi-tenant agent flows, owner operations, and owner pages
 - [`examples/marketplace`](/Users/emmanuelgyekyeatta-penkra/Desktop/Workspace/Konsier/konsier-node/examples/marketplace)
   Hono + Next.js app showing a public storefront, internal pages, and automatic sync on startup
 
@@ -407,6 +425,7 @@ Repo examples live under [`examples/`](/Users/emmanuelgyekyeatta-penkra/Desktop/
 
 - `endpointUrl` must be a valid `http` or `https` URL with no query string or hash
 - The webhook route in your app must exactly match the path portion of `endpointUrl`
+- `publicUrl` must be the public app origin only, with no path, query string, or hash; Pages are launched from this origin
 - `localhost` only works if you expose it through a public tunnel during development
 - If you rename or remove agent refs, run `konsier.sync()` and relink the project agent in Konsier
 - If page verification fails, make sure the request is reaching the correct app origin and path

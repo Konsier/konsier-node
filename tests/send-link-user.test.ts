@@ -45,7 +45,7 @@ describe("sdk resources", () => {
               metadata: { region: "us" },
               connectedAt: new Date().toISOString(),
               linkedAgents: [],
-              internal: { pages: [], tools: [] },
+              internal: { pages: [], operations: [] },
             },
           }),
           {
@@ -68,7 +68,7 @@ describe("sdk resources", () => {
       agents: {
         customer: {
           systemPrompt: "Support",
-          tools: [],
+          operations: [],
         },
       },
     });
@@ -211,7 +211,7 @@ describe("sdk resources", () => {
       agents: {
         customer: {
           systemPrompt: "Support",
-          tools: [],
+          operations: [],
         },
       },
     });
@@ -358,7 +358,7 @@ describe("sdk resources", () => {
       agents: {
         customer: {
           systemPrompt: "Support",
-          tools: [],
+          operations: [],
         },
       },
     });
@@ -411,7 +411,7 @@ describe("sdk resources", () => {
       agents: {
         customer: {
           systemPrompt: "Support",
-          tools: [],
+          operations: [],
         },
       },
     });
@@ -441,7 +441,7 @@ describe("sdk resources", () => {
       agents: {
         customer: {
           systemPrompt: "Support",
-          tools: [],
+          operations: [],
         },
       },
     });
@@ -480,7 +480,7 @@ describe("sdk resources", () => {
         agents: {
           customer: {
             systemPrompt: "Support",
-            tools: [],
+            operations: [],
           },
         },
       });
@@ -519,7 +519,7 @@ describe("sdk resources", () => {
       agents: {
         customer: {
           systemPrompt: "Support",
-          tools: [],
+          operations: [],
         },
       },
     });

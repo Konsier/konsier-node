@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { Konsier, type ToolContext } from "konsier";
+import { Konsier, type OperationContext } from "konsier";
 import { z } from "zod";
 
 import {
@@ -34,21 +34,29 @@ const restaurantCustomer = {
   description: "Handles menu, orders, and reservations for guests.",
   systemPrompt:
     "You are the guest-facing concierge for a restaurant. Always use tools before confirming menu details, orders, or reservations.",
-  tools: [
-    Konsier.tool({
-      name: "get_menu",
+  operations: [
+    Konsier.operation({
+      service: "app",
+      resource: "operations",
+      action: "get_menu",
+      title: "get_menu",
       description: "Return currently available menu items.",
       input: z.object({}),
+      output: z.record(z.string(), z.any()),
       handler: async (_input, ctx) => {
         return {
           menu: getMenu(accountFor(ctx)),
         };
       },
     }),
-    Konsier.tool({
-      name: "get_menu_item",
+    Konsier.operation({
+      service: "app",
+      resource: "operations",
+      action: "get_menu_item",
+      title: "get_menu_item",
       description: "Return details for one menu item.",
       input: z.object({ itemId: z.string().min(1) }),
+      output: z.record(z.string(), z.any()),
       handler: async (input, ctx) => {
         const item = getMenuItem({ ...accountFor(ctx), itemId: input.itemId });
         if (!item) {
@@ -57,10 +65,14 @@ const restaurantCustomer = {
         return { item };
       },
     }),
-    Konsier.tool({
-      name: "start_order",
+    Konsier.operation({
+      service: "app",
+      resource: "operations",
+      action: "start_order",
+      title: "start_order",
       description: "Create or resume an order for the current conversation.",
       input: z.object({}),
+      output: z.record(z.string(), z.any()),
       handler: async (_input, ctx) => {
         return {
           order: startOrder({
@@ -70,13 +82,17 @@ const restaurantCustomer = {
         };
       },
     }),
-    Konsier.tool({
-      name: "add_item_to_order",
+    Konsier.operation({
+      service: "app",
+      resource: "operations",
+      action: "add_item_to_order",
+      title: "add_item_to_order",
       description: "Add one menu item to the current guest order.",
       input: z.object({
         itemId: z.string().min(1),
         quantity: z.number().int().positive().default(1),
       }),
+      output: z.record(z.string(), z.any()),
       handler: async (input, ctx) => {
         const order = addItemToOrder({
           ...accountFor(ctx),
@@ -90,10 +106,14 @@ const restaurantCustomer = {
         return { order };
       },
     }),
-    Konsier.tool({
-      name: "remove_item_from_order",
+    Konsier.operation({
+      service: "app",
+      resource: "operations",
+      action: "remove_item_from_order",
+      title: "remove_item_from_order",
       description: "Remove one menu item from the current order.",
       input: z.object({ itemId: z.string().min(1) }),
+      output: z.record(z.string(), z.any()),
       handler: async (input, ctx) => {
         const order = removeItemFromOrder({
           ...accountFor(ctx),
@@ -106,10 +126,14 @@ const restaurantCustomer = {
         return { order };
       },
     }),
-    Konsier.tool({
-      name: "view_order",
+    Konsier.operation({
+      service: "app",
+      resource: "operations",
+      action: "view_order",
+      title: "view_order",
       description: "Inspect the current order state for the conversation.",
       input: z.object({}),
+      output: z.record(z.string(), z.any()),
       handler: async (_input, ctx) => {
         const order = viewOrder({
           ...accountFor(ctx),
@@ -121,10 +145,14 @@ const restaurantCustomer = {
         return { order };
       },
     }),
-    Konsier.tool({
-      name: "place_order",
+    Konsier.operation({
+      service: "app",
+      resource: "operations",
+      action: "place_order",
+      title: "place_order",
       description: "Finalize the current order.",
       input: z.object({}),
+      output: z.record(z.string(), z.any()),
       handler: async (_input, ctx) => {
         const order = placeOrder({
           ...accountFor(ctx),
@@ -136,14 +164,18 @@ const restaurantCustomer = {
         return { order };
       },
     }),
-    Konsier.tool({
-      name: "book_table",
+    Konsier.operation({
+      service: "app",
+      resource: "operations",
+      action: "book_table",
+      title: "book_table",
       description: "Create a reservation for a guest.",
       input: z.object({
         name: z.string().min(1),
         partySize: z.number().int().positive(),
         time: z.string().min(1),
       }),
+      output: z.record(z.string(), z.any()),
       handler: async (input, ctx) => {
         return {
           reservation: bookTable({
@@ -153,20 +185,28 @@ const restaurantCustomer = {
         };
       },
     }),
-    Konsier.tool({
-      name: "list_reservations",
+    Konsier.operation({
+      service: "app",
+      resource: "operations",
+      action: "list_reservations",
+      title: "list_reservations",
       description: "List reservations for the restaurant.",
       input: z.object({}),
+      output: z.record(z.string(), z.any()),
       handler: async (_input, ctx) => {
         return {
           reservations: listReservations(accountFor(ctx)),
         };
       },
     }),
-    Konsier.tool({
-      name: "cancel_reservation",
+    Konsier.operation({
+      service: "app",
+      resource: "operations",
+      action: "cancel_reservation",
+      title: "cancel_reservation",
       description: "Cancel one reservation.",
       input: z.object({ reservationId: z.string().min(1) }),
+      output: z.record(z.string(), z.any()),
       handler: async (input, ctx) => {
         const reservation = cancelReservation({
           ...accountFor(ctx),
@@ -188,21 +228,29 @@ const restaurantWorker = {
   description: "Helps staff coordinate orders and seating.",
   systemPrompt:
     "You help restaurant staff move service forward. Use tools before describing order or reservation state.",
-  tools: [
-    Konsier.tool({
-      name: "list_open_orders",
+  operations: [
+    Konsier.operation({
+      service: "app",
+      resource: "operations",
+      action: "list_open_orders",
+      title: "list_open_orders",
       description: "List orders still moving through service.",
       input: z.object({}),
+      output: z.record(z.string(), z.any()),
       handler: async (_input, ctx) => {
         return {
           orders: listOpenOrders(accountFor(ctx)),
         };
       },
     }),
-    Konsier.tool({
-      name: "view_order_details",
+    Konsier.operation({
+      service: "app",
+      resource: "operations",
+      action: "view_order_details",
+      title: "view_order_details",
       description: "Return one order in full detail.",
       input: z.object({ orderId: z.string().min(1) }),
+      output: z.record(z.string(), z.any()),
       handler: async (input, ctx) => {
         const order = viewOrderDetails({
           ...accountFor(ctx),
@@ -214,10 +262,14 @@ const restaurantWorker = {
         return { order };
       },
     }),
-    Konsier.tool({
-      name: "mark_order_preparing",
+    Konsier.operation({
+      service: "app",
+      resource: "operations",
+      action: "mark_order_preparing",
+      title: "mark_order_preparing",
       description: "Move an order into preparing state.",
       input: z.object({ orderId: z.string().min(1) }),
+      output: z.record(z.string(), z.any()),
       handler: async (input, ctx) => {
         const order = markOrderPreparing({
           ...accountFor(ctx),
@@ -229,10 +281,14 @@ const restaurantWorker = {
         return { order };
       },
     }),
-    Konsier.tool({
-      name: "mark_order_ready",
+    Konsier.operation({
+      service: "app",
+      resource: "operations",
+      action: "mark_order_ready",
+      title: "mark_order_ready",
       description: "Mark an order as ready for pickup or service.",
       input: z.object({ orderId: z.string().min(1) }),
+      output: z.record(z.string(), z.any()),
       handler: async (input, ctx) => {
         const order = markOrderReady({
           ...accountFor(ctx),
@@ -244,20 +300,28 @@ const restaurantWorker = {
         return { order };
       },
     }),
-    Konsier.tool({
-      name: "list_todays_reservations",
+    Konsier.operation({
+      service: "app",
+      resource: "operations",
+      action: "list_todays_reservations",
+      title: "list_todays_reservations",
       description: "List active reservations for the current restaurant.",
       input: z.object({}),
+      output: z.record(z.string(), z.any()),
       handler: async (_input, ctx) => {
         return {
           reservations: listTodaysReservations(accountFor(ctx)),
         };
       },
     }),
-    Konsier.tool({
-      name: "seat_reservation",
+    Konsier.operation({
+      service: "app",
+      resource: "operations",
+      action: "seat_reservation",
+      title: "seat_reservation",
       description: "Mark a reservation as seated.",
       input: z.object({ reservationId: z.string().min(1) }),
+      output: z.record(z.string(), z.any()),
       handler: async (input, ctx) => {
         const reservation = seatReservation({
           ...accountFor(ctx),
@@ -271,10 +335,14 @@ const restaurantWorker = {
         return { reservation };
       },
     }),
-    Konsier.tool({
-      name: "complete_reservation",
+    Konsier.operation({
+      service: "app",
+      resource: "operations",
+      action: "complete_reservation",
+      title: "complete_reservation",
       description: "Close out a completed seating.",
       input: z.object({ reservationId: z.string().min(1) }),
+      output: z.record(z.string(), z.any()),
       handler: async (input, ctx) => {
         const reservation = completeReservation({
           ...accountFor(ctx),
@@ -291,10 +359,14 @@ const restaurantWorker = {
   ],
 };
 
-const listMenuItemsTool = Konsier.tool({
-  name: "list_menu_items",
+const listMenuItemsTool = Konsier.operation({
+  service: "app",
+  resource: "operations",
+  action: "list_menu_items",
+  title: "list_menu_items",
   description: "List all menu items for owner operations.",
   input: z.object({}),
+  output: z.record(z.string(), z.any()),
   handler: async (_input, ctx) => {
     return {
       menu: listMenuItems(accountFor(ctx)),
@@ -302,14 +374,18 @@ const listMenuItemsTool = Konsier.tool({
   },
 });
 
-const createMenuItemTool = Konsier.tool({
-  name: "create_menu_item",
+const createMenuItemTool = Konsier.operation({
+  service: "app",
+  resource: "operations",
+  action: "create_menu_item",
+  title: "create_menu_item",
   description: "Add a new menu item to the tenant menu.",
   input: z.object({
     name: z.string().min(1),
     price: z.number().positive(),
     category: z.enum(["starter", "main", "dessert", "drink"]),
   }),
+  output: z.record(z.string(), z.any()),
   handler: async (input, ctx) => {
     return {
       item: createMenuItem({
@@ -320,13 +396,17 @@ const createMenuItemTool = Konsier.tool({
   },
 });
 
-const updateMenuItemPriceTool = Konsier.tool({
-  name: "update_menu_item_price",
+const updateMenuItemPriceTool = Konsier.operation({
+  service: "app",
+  resource: "operations",
+  action: "update_menu_item_price",
+  title: "update_menu_item_price",
   description: "Update the price for a menu item.",
   input: z.object({
     itemId: z.string().min(1),
     price: z.number().positive(),
   }),
+  output: z.record(z.string(), z.any()),
   handler: async (input, ctx) => {
     const item = updateMenuItemPrice({
       ...accountFor(ctx),
@@ -339,13 +419,17 @@ const updateMenuItemPriceTool = Konsier.tool({
   },
 });
 
-const toggleMenuItemAvailabilityTool = Konsier.tool({
-  name: "toggle_menu_item_availability",
+const toggleMenuItemAvailabilityTool = Konsier.operation({
+  service: "app",
+  resource: "operations",
+  action: "toggle_menu_item_availability",
+  title: "toggle_menu_item_availability",
   description: "Publish or hide a menu item.",
   input: z.object({
     itemId: z.string().min(1),
     available: z.boolean(),
   }),
+  output: z.record(z.string(), z.any()),
   handler: async (input, ctx) => {
     const item = toggleMenuItemAvailability({
       ...accountFor(ctx),
@@ -358,10 +442,14 @@ const toggleMenuItemAvailabilityTool = Konsier.tool({
   },
 });
 
-const listStaffSummaryTool = Konsier.tool({
-  name: "list_staff_summary",
+const listStaffSummaryTool = Konsier.operation({
+  service: "app",
+  resource: "operations",
+  action: "list_staff_summary",
+  title: "list_staff_summary",
   description: "Summarize staff-facing service activity.",
   input: z.object({}),
+  output: z.record(z.string(), z.any()),
   handler: async (_input, ctx) => {
     return {
       summary: listStaffSummary(accountFor(ctx)),
@@ -369,10 +457,14 @@ const listStaffSummaryTool = Konsier.tool({
   },
 });
 
-const listDailySalesSnapshotTool = Konsier.tool({
-  name: "list_daily_sales_snapshot",
+const listDailySalesSnapshotTool = Konsier.operation({
+  service: "app",
+  resource: "operations",
+  action: "list_daily_sales_snapshot",
+  title: "list_daily_sales_snapshot",
   description: "Return a mock owner sales summary.",
   input: z.object({}),
+  output: z.record(z.string(), z.any()),
   handler: async (_input, ctx) => {
     return {
       snapshot: listDailySalesSnapshot(accountFor(ctx)),
@@ -383,17 +475,21 @@ const listDailySalesSnapshotTool = Konsier.tool({
 const endpointUrl =
   process.env.KONSIER_ENDPOINT_URL ??
   `http://localhost:${process.env.PORT ?? "3004"}/konsier`;
+const publicUrl =
+  process.env.KONSIER_PUBLIC_URL ??
+  `http://localhost:${process.env.PORT ?? "3004"}`;
 
 export const sdk = new Konsier({
   apiKey: process.env.KONSIER_API_KEY ?? "",
   endpointUrl,
+  publicUrl,
   debug: process.env.KONSIER_DEBUG === "true",
   agents: {
     restaurant_customer: restaurantCustomer,
     restaurant_worker: restaurantWorker,
   },
   internal: {
-    tools: [
+    operations: [
       listMenuItemsTool,
       createMenuItemTool,
       updateMenuItemPriceTool,
@@ -405,7 +501,7 @@ export const sdk = new Konsier({
   },
 });
 
-function accountFor(ctx: Pick<ToolContext, "account">): {
+function accountFor(ctx: Pick<OperationContext, "account">): {
   accountId: string;
   accountName?: string | null;
 } {
